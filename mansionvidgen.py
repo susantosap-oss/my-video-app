@@ -1387,11 +1387,68 @@ if btn_full and has_input:
                 fin_paths = [_tmp(f"tmp_{SID}_v_{i}.mp4")
                              for i in range(len(video_files))]
 
+                # ── Scene Detection (senyap, tanpa UI) ───────────────────
+                # Coba deteksi scene change; jika berhasil, ganti segmen.
+                # Jika gagal/tidak ada scene → tetap pakai hasil smart_cut.
+                try:
+                    src_info = {}
+                    for s in segments:
+                        si = s["src_idx"]
+                        if si not in src_info:
+                            src_info[si] = {
+                                "path" : fin_paths[si],
+                                "name" : video_files[si].name,
+                                "dur"  : raw_clips[si].duration,
+                            }
+
+                    sc_segs = []
+                    for si, info in src_info.items():
+                        sp, sname, vid_dur = info["path"], info["name"], info["dur"]
+                        if vid_dur <= 0:
+                            continue
+                        sc_times = _detect_scenes(sp, threshold=0.30)
+                        if len(sc_times) >= 2:
+                            bounds = [0.0] + sc_times + [vid_dur]
+                        else:
+                            # Tidak ada scene → fallback uniform 5 dtk
+                            bounds = list(np.arange(0, vid_dur, 5.0).tolist()) + [vid_dur]
+                        for k in range(len(bounds) - 1):
+                            t0, t1 = bounds[k], bounds[k + 1]
+                            if t1 - t0 < 1.5:
+                                continue
+                            t = t0
+                            while t < t1 - 0.5:
+                                et = min(t + 8.0, t1)
+                                sc_segs.append({
+                                    "src_idx" : si,
+                                    "src_name": sname,
+                                    "src_path": sp,
+                                    "start"   : round(t,  2),
+                                    "end"     : round(et, 2),
+                                    "duration": round(et - t, 2),
+                                })
+                                t += 8.0
+
+                    if sc_segs:
+                        # Pilih segmen sampai memenuhi durasi target
+                        random.shuffle(sc_segs)
+                        chosen, total = [], 0.0
+                        for seg in sc_segs:
+                            if total >= durasi_target:
+                                break
+                            chosen.append(seg)
+                            total += seg["duration"]
+                        for i, seg in enumerate(chosen):
+                            seg["seg_idx"] = i
+                        segments = chosen
+                except Exception:
+                    pass   # Gagal scene detection → tetap pakai smart_cut
+
                 st.session_state.trim_segs = [
                     {
                         **s,
-                        "src_name": video_files[s["src_idx"]].name,
-                        "src_path": fin_paths[s["src_idx"]],
+                        "src_name": s.get("src_name", video_files[s["src_idx"]].name),
+                        "src_path": s.get("src_path", fin_paths[s["src_idx"]]),
                     }
                     for s in segments
                 ]
@@ -1551,101 +1608,7 @@ if st.session_state.trim_segs and not st.session_state.pass1_ready:
     if mode == "photo":
         st.info("✨ Ken Burns Effect (zoom 100% → 115%) akan diterapkan otomatis saat render.")
 
-    # ── Scene Detection — STANDALONE (hanya mode video) ────────────────────
-    if mode == "video":
-        st.caption(
-            "💡 Auto-cut menggunakan **durasi acak 4–6 dtk**. "
-            "Klik **Scene Detection** untuk memotong di titik pergantian adegan alami."
-        )
-        col_scene, col_thresh = st.columns([2, 1])
-        scene_threshold = col_thresh.slider(
-            "Sensitivitas", 0.10, 0.60, 0.30, 0.05,
-            help="Makin rendah = makin banyak scene terdeteksi"
-        )
-        if col_scene.button(
-            "🎬 Re-cut dengan Scene Detection",
-            use_container_width=True,
-            help="Analisis perubahan adegan & potong otomatis di titik scene change",
-        ):
-            with st.spinner("Menganalisis scene change…"):
-                # ── Kumpulkan info per src video ──────────────────────────
-                src_info = {}
-                for s in segs:
-                    si = s.get("src_idx", 0)
-                    if si not in src_info:
-                        src_info[si] = {
-                            "path": s.get("src_path", ""),
-                            "name": s.get("src_name", f"Video {si+1}"),
-                        }
-
-                vc_list   = st.session_state.get("trim_vcs", [])
-                new_segs  = []
-                n_scenes  = 0
-
-                def _segs_from_boundaries(bounds, _si, _sp, _sname, max_dur=8.0):
-                    """Buat daftar segmen dari list batas waktu, maks max_dur/segmen."""
-                    result = []
-                    for k in range(len(bounds) - 1):
-                        t0, t1 = bounds[k], bounds[k + 1]
-                        if t1 - t0 < 1.5:
-                            continue
-                        t = t0
-                        while t < t1 - 0.5:
-                            et = min(t + max_dur, t1)
-                            result.append({
-                                "src_idx" : _si,
-                                "src_name": _sname,
-                                "src_path": _sp,
-                                "start"   : round(t,  2),
-                                "end"     : round(et, 2),
-                                "duration": round(et - t, 2),
-                            })
-                            t += max_dur
-                    return result
-
-                for si, sinfo in src_info.items():
-                    sp    = sinfo["path"]
-                    sname = sinfo["name"]
-                    if not sp or not os.path.exists(sp):
-                        continue
-                    try:
-                        vid_dur = vc_list[si].duration if si < len(vc_list) else 0
-                    except Exception:
-                        vid_dur = 0
-                    if vid_dur <= 0:
-                        continue
-
-                    sc_times = _detect_scenes(sp, threshold=scene_threshold)
-                    n_scenes += len(sc_times)
-
-                    if len(sc_times) >= 2:
-                        bounds = [0.0] + sc_times + [vid_dur]
-                    else:
-                        # Fallback: uniform 5 detik
-                        step = 5.0
-                        bounds = list(np.arange(0, vid_dur, step)) + [vid_dur]
-
-                    new_segs += _segs_from_boundaries(bounds, si, sp, sname)
-
-                if new_segs:
-                    for i, s in enumerate(new_segs):
-                        s["seg_idx"] = i
-                    # Hapus semua thumbnail & mini clip cache lama
-                    for i in range(max(len(segs), len(new_segs)) + 10):
-                        _safe_remove(_tmp(f"tmp_{SID}_mn_{i}.mp4"))
-                        _safe_remove(_tmp(f"tmp_{SID}_th_{i}.jpg"))
-                    st.session_state.trim_segs = new_segs
-                    label = (
-                        f"✅ **{len(new_segs)} segmen** dari **{n_scenes} scene change**"
-                        if n_scenes >= 2
-                        else f"✅ **{len(new_segs)} segmen** (fallback uniform 5 dtk — tidak ada scene change)"
-                    )
-                    st.success(label)
-                    st.rerun()
-                else:
-                    st.warning("⚠️ Tidak ada segmen valid. Cek durasi video atau turunkan sensitivitas.")
-
-    # ── Grid Preview ────────────────────────────────────────────────────────
+    # ── Grid Preview — thumbnail saja, tanpa Play expander ─────────────────
     N_COLS = 3
     for row in [segs[i:i + N_COLS] for i in range(0, len(segs), N_COLS)]:
         cols = st.columns(N_COLS)
@@ -1655,9 +1618,7 @@ if st.session_state.trim_segs and not st.session_state.pass1_ready:
                     idx     = s["seg_idx"]
                     src     = s.get("src_path", "")
                     thumb_p = _tmp(f"tmp_{SID}_th_{idx}.jpg")
-                    mini_p  = _tmp(f"tmp_{SID}_mn_{idx}.mp4")
 
-                    # Thumbnail
                     if not os.path.exists(thumb_p):
                         _extract_thumb(src, s["start"] + s["duration"] / 2, thumb_p)
                     if os.path.exists(thumb_p):
@@ -1669,20 +1630,6 @@ if st.session_state.trim_segs and not st.session_state.pass1_ready:
                         idx + 1, s["src_name"][:16],
                         s["start"], s["end"], s["duration"],
                     ))
-
-                    # Mini clip preview dalam expander
-                    with st.expander("▶ Play"):
-                        if not os.path.exists(mini_p):
-                            with st.spinner("Memotong…"):
-                                _extract_mini(src, s["start"], s["end"], mini_p)
-                        if os.path.exists(mini_p):
-                            try:
-                                with open(mini_p, "rb") as fv:
-                                    st.video(fv.read(), format="video/mp4")
-                            except Exception as e:
-                                st.caption(f"⚠️ {e}")
-                        else:
-                            st.caption("⚠️ Preview tidak tersedia")
 
                 else:  # photo
                     photo_paths = st.session_state.get("photo_paths", [])
