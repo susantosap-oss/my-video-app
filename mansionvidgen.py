@@ -36,7 +36,7 @@ from moviepy import (
     VideoClip, concatenate_videoclips, CompositeAudioClip,
 )
 from moviepy.video.fx import Crop, FadeIn, FadeOut
-from moviepy.audio.fx import AudioFadeOut, MultiplyVolume
+from moviepy.audio.fx import AudioFadeIn, AudioFadeOut, MultiplyVolume
 
 # ── [Linux] ImageMagick binary untuk MoviePy TextClip ────────────────────────
 try:
@@ -953,7 +953,8 @@ def run_pass2(
             overlays.append(render_caption(
                 cap, OUT_W, OUT_H, sz, pad_x, pad_y,
                 color=clr, font_path=font_path,
-                logo_pil=logo_pil, align=caption_align,
+                logo_pil=None,        # ← LOGO TIDAK di sini: sudah di-bake Pass 1
+                align=caption_align,
             ))
 
         cta_ov = None
@@ -961,7 +962,8 @@ def run_pass2(
             cta_ov = render_cta(
                 cta_nama.strip(), cta_wa.strip(),
                 OUT_W, OUT_H, font_size, pad_x, pad_y,
-                font_path=font_path, logo_pil=logo_pil,
+                font_path=font_path,
+                logo_pil=None,        # ← LOGO TIDAK di sini: sudah di-bake Pass 1
                 label=cta_label.strip(),
             )
 
@@ -994,8 +996,10 @@ def run_pass2(
 
                 if bgm_raw.duration > total_dur:
                     bgm_raw = bgm_raw.subclipped(0, total_dur)
-                fo_dur    = min(3.0, bgm_raw.duration * 0.3)
+                fi_dur    = min(3.0, bgm_raw.duration * 0.15)   # Fade In 3 dtk
+                fo_dur    = min(3.0, bgm_raw.duration * 0.30)   # Fade Out 3 dtk
                 bgm_audio = bgm_raw.with_effects([
+                    AudioFadeIn(fi_dur),
                     AudioFadeOut(fo_dur),
                     MultiplyVolume(bgm_volume),
                 ])
@@ -1004,7 +1008,7 @@ def run_pass2(
                 mixed = [a for a in [audio_src, bgm_audio] if a is not None]
                 if mixed:
                     audio_src = CompositeAudioClip(mixed)
-                st.write(f"  ✅ BGM {bgm_raw.duration:.1f}s · fade-out {fo_dur:.1f}s")
+                st.write(f"  ✅ BGM {bgm_raw.duration:.1f}s · fade-in {fi_dur:.1f}s · fade-out {fo_dur:.1f}s")
 
             except Exception as e:
                 st.warning(f"⚠️ BGM gagal dimuat: {e}")
@@ -1452,7 +1456,7 @@ def _extract_thumb(src: str, t: float, out_path: str) -> bool:
         r = subprocess.run([
             "ffmpeg", "-y",
             "-ss", str(round(t, 2)), "-i", src,
-            "-vframes", "1", "-vf", "scale=240:-1", "-q:v", "4",
+            "-vframes", "1", "-vf", "scale=240:-2", "-q:v", "4",
             out_path,
         ], capture_output=True, text=True, timeout=10)
         return r.returncode == 0 and os.path.exists(out_path)
@@ -1461,20 +1465,51 @@ def _extract_thumb(src: str, t: float, out_path: str) -> bool:
 
 
 def _extract_mini(src: str, start: float, end: float, out_path: str) -> bool:
-    """Ekstrak potongan mini clip (tanpa audio) untuk preview."""
+    """
+    Ekstrak mini clip untuk preview — skala ke max 360px lebar/tinggi,
+    aman untuk video portrait maupun landscape.
+    """
     try:
+        dur = max(0.5, round(end - start, 2))
+        # scale=360:-2  → lebar max 360, tinggi auto (genap)
+        # Untuk portrait (tinggi > lebar), gunakan -2:360
+        # Tapi ffmpeg bisa handle keduanya dengan vf scale jika pakai min():
+        # Pakai cara paling simpel & reliable: resize ke 360px lebar saja
         r = subprocess.run([
             "ffmpeg", "-y",
-            "-ss", str(round(start, 2)), "-i", src,
-            "-t",  str(round(end - start, 2)),
-            "-vf", "scale=360:-2",
+            "-ss", str(round(start, 2)),
+            "-i",  src,
+            "-t",  str(dur),
+            "-vf", "scale=360:-2",        # 360px lebar, tinggi auto-even
             "-c:v", "libx264", "-crf", "28", "-preset", "ultrafast",
-            "-an", "-movflags", "+faststart",
+            "-an",                         # tanpa audio — lebih cepat
+            "-movflags", "+faststart",
             out_path,
         ], capture_output=True, text=True, timeout=30)
         return r.returncode == 0 and os.path.exists(out_path)
     except Exception:
         return False
+
+
+def _detect_scenes(src: str, threshold: float = 0.35, max_scenes: int = 20) -> list[float]:
+    """
+    Deteksi scene change dari video menggunakan ffmpeg select filter.
+    Return list timestamp (detik) setiap scene change.
+    Fallback ke [] jika ffmpeg gagal.
+    """
+    try:
+        r = subprocess.run([
+            "ffmpeg", "-i", src,
+            "-filter:v", f"select='gt(scene,{threshold})',showinfo",
+            "-frames:v", str(max_scenes),
+            "-f", "null", "-",
+        ], capture_output=True, text=True, timeout=20)
+        # Parse "pts_time:" dari stderr
+        import re
+        times = [float(m) for m in re.findall(r"pts_time:([\d.]+)", r.stderr)]
+        return sorted(set(times))
+    except Exception:
+        return []
 
 
 if st.session_state.trim_segs and not st.session_state.pass1_ready:
@@ -1485,6 +1520,140 @@ if st.session_state.trim_segs and not st.session_state.pass1_ready:
     if mode == "photo":
         st.info("✨ Ken Burns Effect (zoom 100% → 115%) akan diterapkan otomatis saat render.")
 
+    # ── Panel Trim Manual (hanya mode video) ───────────────────────────────
+    if mode == "video":
+        with st.expander("✂️ Trim Manual — atur ulang IN/OUT setiap segmen", expanded=False):
+            st.caption(
+                "Geser slider **Start** dan **End** untuk mengubah titik potong. "
+                "Klik **Terapkan Trim** setelah selesai."
+            )
+            updated_segs  = list(segs)
+            needs_refresh = False
+
+            for i, s in enumerate(segs):
+                vc_list = st.session_state.get("trim_vcs", [])
+                src_idx = s.get("src_idx", 0)
+                try:
+                    max_dur = vc_list[src_idx].duration if src_idx < len(vc_list) else s["end"] + 10
+                except Exception:
+                    max_dur = s["end"] + 10
+
+                st.markdown(f"**Segmen #{i+1}** · `{s['src_name'][:24]}`")
+                c_s, c_e = st.columns(2)
+                new_start = c_s.number_input(
+                    "Start (dtk)", min_value=0.0,
+                    max_value=float(max_dur) - 0.5,
+                    value=float(s["start"]),
+                    step=0.5, key=f"trim_s_{i}",
+                )
+                new_end = c_e.number_input(
+                    "End (dtk)", min_value=new_start + 0.5,
+                    max_value=float(max_dur),
+                    value=float(s["end"]),
+                    step=0.5, key=f"trim_e_{i}",
+                )
+                if new_start != s["start"] or new_end != s["end"]:
+                    updated_segs[i] = {
+                        **s,
+                        "start"   : round(new_start, 2),
+                        "end"     : round(new_end,   2),
+                        "duration": round(new_end - new_start, 2),
+                    }
+                    needs_refresh = True
+
+            col_apply, col_scene = st.columns(2)
+            if col_apply.button("✅ Terapkan Trim", use_container_width=True, type="primary"):
+                # Re-assign seg_idx urut setelah trim
+                for i, seg in enumerate(updated_segs):
+                    seg["seg_idx"] = i
+                # Hapus cache mini clips agar di-generate ulang dengan titik baru
+                for i in range(len(segs) + 5):
+                    _safe_remove(_tmp(f"tmp_{SID}_mn_{i}.mp4"))
+                    _safe_remove(_tmp(f"tmp_{SID}_th_{i}.jpg"))
+                st.session_state.trim_segs = updated_segs
+                st.rerun()
+
+            # ── Deteksi Scene Change ────────────────────────────────────────
+            if col_scene.button("🎬 Deteksi Scene Change", use_container_width=True,
+                                help="Temukan titik potong alami berdasarkan perubahan adegan"):
+                with st.spinner("Menganalisis scene change..."):
+                    # Buat map src_idx → {path, name, duration}
+                    src_info = {}
+                    for s in segs:
+                        si = s.get("src_idx", 0)
+                        if si not in src_info:
+                            src_info[si] = {
+                                "path": s.get("src_path", ""),
+                                "name": s.get("src_name", f"Video {si+1}"),
+                            }
+
+                    vc_list = st.session_state.get("trim_vcs", [])
+                    new_segs = []
+
+                    for si, sinfo in src_info.items():
+                        sp = sinfo["path"]
+                        sname = sinfo["name"]
+                        if not sp or not os.path.exists(sp):
+                            continue
+                        try:
+                            vid_dur = vc_list[si].duration if si < len(vc_list) else 0
+                        except Exception:
+                            vid_dur = 0
+                        if vid_dur <= 0:
+                            continue
+
+                        scene_times = _detect_scenes(sp, threshold=0.35)
+
+                        def _make_segs_from_boundaries(boundaries, si, sp, sname, max_seg_dur=8.0):
+                            result = []
+                            for k in range(len(boundaries) - 1):
+                                seg_start = boundaries[k]
+                                seg_end   = boundaries[k + 1]
+                                seg_dur   = seg_end - seg_start
+                                if seg_dur < 1.5:
+                                    continue
+                                # Sub-potong jika terlalu panjang
+                                t = seg_start
+                                while t < seg_end - 0.5:
+                                    end_t = min(t + max_seg_dur, seg_end)
+                                    result.append({
+                                        "src_idx" : si,
+                                        "src_name": sname,
+                                        "src_path": sp,
+                                        "start"   : round(t, 2),
+                                        "end"     : round(end_t, 2),
+                                        "duration": round(end_t - t, 2),
+                                    })
+                                    t += max_seg_dur
+                            return result
+
+                        if len(scene_times) < 2:
+                            # Fallback: potong uniform 5 detik
+                            boundaries = list(range(0, int(vid_dur), 5)) + [vid_dur]
+                        else:
+                            boundaries = [0.0] + scene_times + [vid_dur]
+
+                        new_segs += _make_segs_from_boundaries(
+                            boundaries, si, sp, sname
+                        )
+
+                    if new_segs:
+                        for i, s in enumerate(new_segs):
+                            s["seg_idx"] = i
+                        # Hapus semua cache
+                        for i in range(len(segs) + len(new_segs) + 10):
+                            _safe_remove(_tmp(f"tmp_{SID}_mn_{i}.mp4"))
+                            _safe_remove(_tmp(f"tmp_{SID}_th_{i}.jpg"))
+                        st.session_state.trim_segs = new_segs
+                        st.success(
+                            f"✅ Ditemukan **{len(new_segs)} segmen** "
+                            f"berdasarkan {len([t for si,sinfo in src_info.items() for t in _detect_scenes(sinfo['path'])])} scene change."
+                        )
+                        st.rerun()
+                    else:
+                        st.warning("Tidak ada segmen valid. Coba turunkan threshold atau cek durasi video.")
+
+    # ── Grid Preview ───────────────────────────────────────────────────────
     N_COLS = 3
     for row in [segs[i:i + N_COLS] for i in range(0, len(segs), N_COLS)]:
         cols = st.columns(N_COLS)
@@ -1510,11 +1679,16 @@ if st.session_state.trim_segs and not st.session_state.pass1_ready:
                     with st.expander("▶ Play clip"):
                         if not os.path.exists(mini_p):
                             with st.spinner("Memotong clip..."):
-                                _extract_mini(src, s["start"], s["end"], mini_p)
+                                ok_mini = _extract_mini(src, s["start"], s["end"], mini_p)
+                        # ← FIX: baca sebagai bytes agar bisa di-serve Streamlit Cloud
                         if os.path.exists(mini_p):
-                            st.video(mini_p)
+                            try:
+                                with open(mini_p, "rb") as fv:
+                                    st.video(fv.read(), format="video/mp4")
+                            except Exception:
+                                st.warning("Gagal memutar clip.")
                         else:
-                            st.warning("Gagal memuat clip.")
+                            st.warning("Gagal mengekstrak clip.")
 
                 else:  # photo
                     photo_paths = st.session_state.get("photo_paths", [])
@@ -1814,8 +1988,8 @@ if st.session_state.pass2_done and st.session_state.video_bytes:
     st.divider()
     st.subheader("🎬 Preview & Download")
 
-    if os.path.exists(st.session_state.out_path):
-        st.video(st.session_state.out_path)
+    # ← FIX: gunakan bytes agar reliable di Streamlit Cloud (path /tmp tidak di-serve)
+    st.video(st.session_state.video_bytes, format="video/mp4")
 
     ca, cb = st.columns([3, 1])
     with ca:
