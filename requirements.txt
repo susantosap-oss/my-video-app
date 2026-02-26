@@ -1,0 +1,24 @@
+# ─────────────────────────────────────────────────────────────────
+# requirements.txt — Mansion Video Generator
+# Streamlit Cloud (Python 3.11 / Linux Ubuntu 22.04)
+# ─────────────────────────────────────────────────────────────────
+
+# ── Core Web App ───────────────────────────────────────────────────
+streamlit>=1.35.0
+
+# ── Video Processing ───────────────────────────────────────────────
+moviepy>=2.0.0
+imageio>=2.34.0
+imageio-ffmpeg>=0.5.1
+
+# ── Image Processing ───────────────────────────────────────────────
+Pillow>=10.3.0
+numpy>=1.26.0
+
+# ── NLP Engine (prioritas: NLTK → TextBlob → Regex builtin) ────────
+nltk>=3.8.1
+textblob>=0.18.0
+
+# ── Utilities ──────────────────────────────────────────────────────
+decorator>=4.4.2
+tqdm>=4.66.0
