@@ -1,0 +1,17 @@
+# ─────────────────────────────────────────────────────────────────
+# packages.txt — Mansion Video Generator
+# Sistem Linux (apt-get) — Streamlit Cloud
+# Berisi dependensi OS-level yang tidak bisa di-pip install
+# ─────────────────────────────────────────────────────────────────
+
+# ── Video & Audio Engine ───────────────────────────────────────────
+ffmpeg
+
+# ── ImageMagick (dipakai MoviePy untuk TextClip) ───────────────────
+imagemagick
+
+# ── Font Sistem Linux (fallback jika folder fonts/ kosong) ─────────
+fonts-dejavu-core
+fonts-liberation
+fonts-freefont-ttf
+fonts-urw-base35
