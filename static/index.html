@@ -567,6 +567,58 @@
     </div>
   </div>
 
+  <!-- ═══ ADMIN: Dashboard (owner only) ══════════════════════════════════ -->
+  <div id="admin-dashboard-section" class="hidden card p-6">
+    <div class="flex items-center justify-between mb-5">
+      <h2 class="font-semibold text-white flex items-center gap-2">📊 Dashboard</h2>
+      <div class="flex items-center gap-3">
+        <span id="dash-month" class="text-xs text-gray-600"></span>
+        <button onclick="loadDashboard()" class="text-xs text-gray-500 hover:text-white transition-colors">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-2 gap-3 mb-5 md:grid-cols-4">
+      <div class="rounded-lg p-4 text-center" style="background:#1a1a1a">
+        <p id="dash-active" class="text-3xl font-bold text-yellow-400">—</p>
+        <p class="text-xs text-gray-500 mt-1">Subscriber Aktif</p>
+      </div>
+      <div class="rounded-lg p-4 text-center" style="background:#1a1a1a">
+        <p id="dash-videos" class="text-3xl font-bold text-green-400">—</p>
+        <p class="text-xs text-gray-500 mt-1">Video Bulan Ini</p>
+      </div>
+      <div class="rounded-lg p-4 text-center" style="background:#1a1a1a">
+        <p id="dash-new" class="text-3xl font-bold text-blue-400">—</p>
+        <p class="text-xs text-gray-500 mt-1">Subscriber Baru</p>
+      </div>
+      <div class="rounded-lg p-4 text-center" style="background:#1a1a1a">
+        <p id="dash-inactive" class="text-3xl font-bold text-gray-500">—</p>
+        <p class="text-xs text-gray-500 mt-1">Nonaktif</p>
+      </div>
+    </div>
+
+    <!-- Breakdown + Top Users -->
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+
+      <!-- Breakdown per Paket -->
+      <div>
+        <p class="text-xs text-gray-500 uppercase tracking-wider mb-3 font-medium">Breakdown per Paket</p>
+        <div id="dash-pkg-table">
+          <p class="text-xs text-gray-600">Memuat...</p>
+        </div>
+      </div>
+
+      <!-- Top Users -->
+      <div>
+        <p class="text-xs text-gray-500 uppercase tracking-wider mb-3 font-medium">Top User — Video Terbanyak Bulan Ini</p>
+        <div id="dash-top-users">
+          <p class="text-xs text-gray-600">Memuat...</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <!-- ═══ ADMIN: Manajemen Subscriber (mansion_team + owner) ══════════════ -->
   <div id="admin-users-section" class="hidden card p-6">
     <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
@@ -1082,8 +1134,10 @@ function applyUserProfile(user) {
     loadAdminUsers();
   }
 
-  // Package editor + settings — owner only
+  // Dashboard + Package editor + settings — owner only
   if (user.is_owner) {
+    document.getElementById("admin-dashboard-section").classList.remove("hidden");
+    loadDashboard();
     document.getElementById("admin-packages-section").classList.remove("hidden");
     loadAdminPackages();
     loadAdminSettings();
@@ -1233,6 +1287,65 @@ function showPkgMsg(msg, cls) {
   el.className   = `text-xs mt-3 text-center ${cls}`;
   el.classList.remove("hidden");
   setTimeout(() => el.classList.add("hidden"), 4000);
+}
+
+// ── Admin: Dashboard ──────────────────────────────────────────────────────
+async function loadDashboard() {
+  const res = await apiFetch("/api/admin/dashboard");
+  if (!res.ok) return;
+  const d = await res.json();
+
+  // Month label
+  const [y, m] = d.month.split("-");
+  const months = ["","Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+  document.getElementById("dash-month").textContent = `${months[parseInt(m)]} ${y}`;
+
+  // Cards
+  document.getElementById("dash-active").textContent   = d.total_active;
+  document.getElementById("dash-videos").textContent   = d.total_videos;
+  document.getElementById("dash-new").textContent      = d.new_this_month;
+  document.getElementById("dash-inactive").textContent = d.total_inactive;
+
+  // Breakdown per paket
+  const PKG_COL = { trial:"text-gray-400", basic:"text-blue-400", lite:"text-green-400", pro:"text-yellow-400" };
+  const pkgRows = d.by_package.map(p => `
+    <tr class="border-b border-dark-600">
+      <td class="py-1.5 pr-3">
+        <span class="text-xs font-semibold ${PKG_COL[p.key]||'text-gray-400'}">${p.label}</span>
+      </td>
+      <td class="text-center text-xs text-gray-300 pr-3">${p.active}<span class="text-gray-600">/${p.total}</span></td>
+      <td class="text-center text-xs text-yellow-400">${p.videos}</td>
+    </tr>`).join("") || '<tr><td colspan="3" class="text-xs text-gray-600 py-2">Belum ada data</td></tr>';
+
+  document.getElementById("dash-pkg-table").innerHTML = `
+    <table class="w-full text-sm">
+      <thead><tr class="text-xs text-gray-600 border-b border-dark-500">
+        <th class="text-left pb-2">Paket</th>
+        <th class="text-center pb-2">Aktif/Total</th>
+        <th class="text-center pb-2">Video</th>
+      </tr></thead>
+      <tbody>${pkgRows}</tbody>
+    </table>`;
+
+  // Top users
+  const topRows = d.top_users.map((u, i) => `
+    <tr class="border-b border-dark-600">
+      <td class="py-1.5 pr-2 text-xs text-gray-600">${i+1}</td>
+      <td class="py-1.5 pr-3 text-xs text-white">${u.username}</td>
+      <td class="py-1.5 pr-3 text-xs text-gray-400">${u.package}</td>
+      <td class="py-1.5 text-center text-xs text-yellow-400 font-medium">${u.videos}</td>
+    </tr>`).join("") || '<tr><td colspan="4" class="text-xs text-gray-600 py-2">Belum ada aktivitas bulan ini</td></tr>';
+
+  document.getElementById("dash-top-users").innerHTML = `
+    <table class="w-full text-sm">
+      <thead><tr class="text-xs text-gray-600 border-b border-dark-500">
+        <th class="text-left pb-2 pr-2">#</th>
+        <th class="text-left pb-2 pr-3">User</th>
+        <th class="text-left pb-2 pr-3">Paket</th>
+        <th class="text-center pb-2">Video</th>
+      </tr></thead>
+      <tbody>${topRows}</tbody>
+    </table>`;
 }
 
 // ── Admin: User Management ─────────────────────────────────────────────────

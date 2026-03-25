@@ -164,6 +164,87 @@ def _reload_packages():
     PACKAGES.update(get_packages())
 
 
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+def get_dashboard_stats() -> dict:
+    """Aggregate stats from existing tables — no extra schema needed."""
+    current_month = datetime.now().strftime("%Y-%m")
+    conn = get_conn()
+
+    # Subscriber only (exclude system accounts)
+    SYSTEM_TYPES = ("owner", "mansion_team")
+
+    # Total active subscribers
+    total_active = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE user_type NOT IN (?,?) AND is_active=1",
+        SYSTEM_TYPES,
+    ).fetchone()[0]
+
+    total_inactive = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE user_type NOT IN (?,?) AND is_active=0",
+        SYSTEM_TYPES,
+    ).fetchone()[0]
+
+    # New subscribers this month
+    new_this_month = conn.execute(
+        "SELECT COUNT(*) FROM users WHERE user_type NOT IN (?,?) AND strftime('%Y-%m', created_at)=?",
+        (*SYSTEM_TYPES, current_month),
+    ).fetchone()[0]
+
+    # Total videos rendered this month (sum across all non-system users)
+    total_videos = conn.execute(
+        "SELECT COALESCE(SUM(videos_used),0) FROM users WHERE user_type NOT IN (?,?) AND billing_month=?",
+        (*SYSTEM_TYPES, current_month),
+    ).fetchone()[0]
+
+    # Breakdown per package
+    pkg_rows = conn.execute(
+        """SELECT package,
+                  COUNT(*) as total,
+                  SUM(CASE WHEN is_active=1 THEN 1 ELSE 0 END) as active,
+                  COALESCE(SUM(CASE WHEN billing_month=? THEN videos_used ELSE 0 END),0) as videos
+           FROM users WHERE user_type NOT IN (?,?)
+           GROUP BY package ORDER BY package""",
+        (current_month, *SYSTEM_TYPES),
+    ).fetchall()
+
+    # Top 10 users by videos this month
+    top_users = conn.execute(
+        """SELECT username, package, videos_used, billing_month
+           FROM users WHERE user_type NOT IN (?,?) AND billing_month=? AND videos_used > 0
+           ORDER BY videos_used DESC LIMIT 10""",
+        (*SYSTEM_TYPES, current_month),
+    ).fetchall()
+
+    conn.close()
+
+    pkgs = get_packages()
+    return {
+        "month"         : current_month,
+        "total_active"  : total_active,
+        "total_inactive": total_inactive,
+        "new_this_month": new_this_month,
+        "total_videos"  : int(total_videos),
+        "by_package"    : [
+            {
+                "key"   : r["package"],
+                "label" : pkgs.get(r["package"], {}).get("label", r["package"]),
+                "total" : r["total"],
+                "active": r["active"],
+                "videos": r["videos"],
+            }
+            for r in pkg_rows
+        ],
+        "top_users": [
+            {
+                "username": r["username"],
+                "package" : pkgs.get(r["package"], {}).get("label", r["package"]),
+                "videos"  : r["videos_used"],
+            }
+            for r in top_users
+        ],
+    }
+
+
 # ── User queries ──────────────────────────────────────────────────────────────
 def get_user_by_username(username: str) -> dict | None:
     conn = get_conn()

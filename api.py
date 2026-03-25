@@ -219,6 +219,12 @@ async def admin_update_settings(req: SiteSettingsRequest, request: Request):
     return {"ok": True}
 
 
+@app.get("/api/admin/dashboard")
+async def admin_dashboard(request: Request):
+    _require_mansion(request)
+    return DB.get_dashboard_stats()
+
+
 @app.get("/api/admin/packages")
 async def admin_get_packages(request: Request):
     _require_owner(request)

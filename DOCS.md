@@ -21,7 +21,8 @@
 11. [Frontend — Halaman & Fitur per Role](#11-frontend--halaman--fitur-per-role)
 12. [Alur Pendaftaran Subscriber](#12-alur-pendaftaran-subscriber)
 13. [Watermark Trial](#13-watermark-trial)
-14. [Catatan Deploy](#14-catatan-deploy)
+14. [Dashboard Owner](#14-dashboard-owner)
+15. [Catatan Deploy](#15-catatan-deploy)
 
 ---
 
@@ -430,7 +431,55 @@ Subscriber aktif
 
 ---
 
-## 14. Catatan Deploy
+## 14. Dashboard Owner
+
+Dashboard ringkas tersedia di panel Admin/Owner — tanpa tabel tambahan, semua data dari schema yang sudah ada.
+
+### Akses
+- Hanya tampil untuk `user_type = "owner"`
+- Endpoint: `GET /api/admin/dashboard`
+
+### Data yang Ditampilkan
+
+#### Summary Cards (bulan berjalan)
+| Card | Sumber Data |
+|------|-------------|
+| Subscriber Aktif | `COUNT(users WHERE is_active=1)` |
+| Video Bulan Ini | `SUM(videos_used WHERE billing_month=current)` |
+| Subscriber Baru | `COUNT(users WHERE created_at LIKE 'YYYY-MM%')` |
+| Nonaktif | `COUNT(users WHERE is_active=0)` |
+
+#### Breakdown per Paket
+- Nama paket, jumlah aktif/total, video dibuat bulan ini
+- Exclude akun sistem (owner, mansion_team)
+
+#### Top 10 User (Video Terbanyak Bulan Ini)
+- Username, paket, jumlah video — sorted descending
+
+### Keterbatasan Dashboard Ringkas
+- Data **bulanan saja** — tidak ada drill-down harian/mingguan
+- Tidak ada data per jam (peak hours)
+- Tidak ada breakdown Full AI vs Manual mode
+
+### Rencana Dashboard Lanjutan (Fase Berikutnya)
+Jika traffic sudah ada dan perlu analitik lebih dalam, tambahkan tabel:
+```sql
+CREATE TABLE render_logs (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER,
+    timestamp  TEXT DEFAULT (datetime('now')),
+    duration   INTEGER,
+    resolution TEXT,
+    mode       TEXT,      -- 'full_ai' | 'manual'
+    status     TEXT,      -- 'done' | 'error'
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+```
+Dengan tabel ini bisa dapat: harian, mingguan, peak hours, error rate, AI vs manual ratio.
+
+---
+
+## 15. Catatan Deploy
 
 ### Environment Variables yang Dibutuhkan
 ```env
@@ -471,6 +520,7 @@ CMD uvicorn api:app --host 0.0.0.0 --port $PORT
 | Tanggal | Keterangan |
 |---------|------------|
 | 25 Mar 2026 | ✅ Local test OK. Full AI + Manual render, Auth, Admin panel, Tutorial, Watermark Trial, Package editor, Subscribe info, Ganti password semua berfungsi. Belum deploy ke Cloud Run. |
+| 25 Mar 2026 | ➕ Dashboard owner ringkas (summary cards + breakdown paket + top users). Data dari schema existing, tanpa tabel baru. |
 
 ---
 
