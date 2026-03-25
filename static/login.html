@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login — Video Generator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { colors: {
+        gold: { 400:'#fbbf24', 500:'#f59e0b' },
+        dark: { 900:'#0a0a0a', 800:'#111111', 700:'#1a1a1a', 500:'#2a2a2a' }
+      }}}
+    }
+  </script>
+  <style>
+    body { background:#0a0a0a; }
+    .input-base {
+      background:#1a1a1a; border:1px solid #2a2a2a; color:#f9fafb;
+      border-radius:.5rem; padding:.6rem .75rem; width:100%; outline:none; transition:border-color .2s;
+    }
+    .input-base:focus { border-color:#f59e0b; }
+    .input-base::placeholder { color:#4b5563; }
+    .btn-gold {
+      background:#f59e0b; color:#0a0a0a; font-weight:700; border-radius:.5rem;
+      padding:.7rem 1.5rem; width:100%; transition:background .2s, transform .1s; cursor:pointer;
+    }
+    .btn-gold:hover { background:#fbbf24; }
+    .btn-gold:active { transform:scale(.97); }
+    .btn-gold:disabled { background:#333; color:#555; cursor:not-allowed; }
+    .card { background:#111111; border:1px solid #222222; border-radius:.75rem; }
+    .pkg-row { transition: background .15s; }
+    .pkg-row:hover { background:#1a1a1a; }
+    .badge {
+      display:inline-block; font-size:.7rem; padding:.1rem .45rem;
+      border-radius:.25rem; font-weight:600;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center px-4">
+
+  <!-- Logo / Title -->
+  <div class="text-center mb-8">
+    <div class="text-5xl mb-3">🎬</div>
+    <h1 class="text-2xl font-bold text-white tracking-tight">
+      <span class="text-yellow-400">Video</span> Generator
+    </h1>
+    <p class="text-gray-500 text-sm mt-1">Masuk untuk mulai membuat konten video properti</p>
+  </div>
+
+  <!-- Login Card -->
+  <div class="card p-7 w-full max-w-sm space-y-5">
+
+    <div id="error-msg" class="hidden text-sm text-red-400 bg-red-950 border border-red-900 rounded-lg px-3 py-2 text-center"></div>
+
+    <div class="space-y-3">
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">Username</label>
+        <input type="text" id="username" class="input-base" placeholder="Username" autocomplete="username"
+               onkeydown="if(event.key==='Enter') document.getElementById('password').focus()" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">Password</label>
+        <div class="relative">
+          <input type="password" id="password" class="input-base pr-10" placeholder="Password" autocomplete="current-password"
+                 onkeydown="if(event.key==='Enter') doLogin()" />
+          <button onclick="togglePw()" class="absolute right-3 top-2.5 text-gray-500 hover:text-white text-sm">👁</button>
+        </div>
+      </div>
+    </div>
+
+    <button onclick="doLogin()" id="btn-login" class="btn-gold">Masuk</button>
+
+    <div class="relative flex items-center gap-2">
+      <div class="flex-1 h-px" style="background:#222"></div>
+      <span class="text-xs text-gray-600">atau</span>
+      <div class="flex-1 h-px" style="background:#222"></div>
+    </div>
+
+    <button onclick="loginTrial()" class="w-full py-2.5 rounded-lg border text-sm font-medium transition-all"
+            style="border-color:#2a2a2a; color:#9ca3af;"
+            onmouseover="this.style.borderColor='#f59e0b';this.style.color='#f59e0b'"
+            onmouseout="this.style.borderColor='#2a2a2a';this.style.color='#9ca3af'">
+      🆓 Login as Trial <span class="text-gray-600 font-normal">(gratis, fitur terbatas)</span>
+    </button>
+
+  </div>
+
+  <p class="text-xs text-gray-700 mt-6">© Video Generator 2026</p>
+
+<script>
+  // If already logged in, redirect to app
+  window.addEventListener("DOMContentLoaded", () => {
+    const token = localStorage.getItem("vg_token");
+    if (token) {
+      fetch("/api/me", { headers: { "Authorization": "Bearer " + token } })
+        .then(r => r.ok ? window.location.href = "/" : null)
+        .catch(() => null);
+    }
+  });
+
+  async function doLogin() {
+    const username = document.getElementById("username").value.trim();
+    const password = document.getElementById("password").value;
+    if (!username || !password) {
+      showError("Username dan password wajib diisi.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res  = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showError(data.detail || "Login gagal.");
+      } else {
+        localStorage.setItem("vg_token", data.token);
+        window.location.href = "/";
+      }
+    } catch(e) {
+      showError("Tidak dapat menghubungi server.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function loginTrial() {
+    document.getElementById("username").value = "Trial";
+    document.getElementById("password").value = "Trial";
+    doLogin();
+  }
+
+  function showError(msg) {
+    const el = document.getElementById("error-msg");
+    el.textContent = msg;
+    el.classList.remove("hidden");
+    setTimeout(() => el.classList.add("hidden"), 4000);
+  }
+
+  function setLoading(on) {
+    const btn = document.getElementById("btn-login");
+    btn.disabled = on;
+    btn.textContent = on ? "Memproses..." : "Masuk";
+  }
+
+  function togglePw() {
+    const inp = document.getElementById("password");
+    inp.type = inp.type === "password" ? "text" : "password";
+  }
+</script>
+</body>
+</html>

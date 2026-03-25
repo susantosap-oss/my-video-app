@@ -304,6 +304,30 @@ with st.sidebar:
     ], index=0)
     fade_dur = st.slider("Durasi Transisi (detik)", 0.2, 1.5, 0.4, 0.1)
 
+    st.divider()
+    st.header("🤖 Director AI")
+    director_prompt = st.text_area(
+        "Instruksi gaya video",
+        placeholder=(
+            "Contoh: Buat video properti modern elegan, hook kuat dari "
+            "eksterior terbaik, interior di tengah, tutup dengan view lokasi. "
+            "Tone hangat dan premium, target TikTok & Instagram."
+        ),
+        height=110,
+        help="AI mengatur urutan klip, durasi, transisi, dan color grade otomatis.",
+    )
+    anthropic_key = st.text_input(
+        "Anthropic API Key",
+        type="password",
+        placeholder="sk-ant-...",
+        help="Diperlukan untuk mengaktifkan AI Director.",
+    )
+    use_ai_director = bool(director_prompt.strip() and anthropic_key.strip())
+    if use_ai_director:
+        st.caption("✅ AI Director aktif")
+    elif director_prompt.strip():
+        st.warning("⚠️ Isi API Key untuk aktifkan AI")
+
 
 # ── Mode Input: Tab A (Video) | Tab B (Photo Slide) ───────────────────────────
 tab_video, tab_photo = st.tabs(["🎬  A · Buat Video", "🖼️  B · Photo Slide"])
@@ -1041,6 +1065,191 @@ def build_photo_slideshow(photo_paths: list, target_dur: int,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# HELPERS — Scene Scoring (ffmpeg + numpy, zero new deps)
+# ─────────────────────────────────────────────────────────────────────────────
+def _laplacian_var(arr: np.ndarray) -> float:
+    """Variance of Laplacian approximation — higher = sharper."""
+    lap = (
+        -4.0 * arr[1:-1, 1:-1]
+        + arr[:-2, 1:-1] + arr[2:,  1:-1]
+        + arr[1:-1, :-2] + arr[1:-1, 2:]
+    )
+    return float(np.var(lap))
+
+
+def score_segment(src_path: str, start: float, end: float,
+                  sid: str, seg_idx: int) -> dict:
+    """
+    Score a video segment by sampling 2 frames via ffmpeg.
+    Returns: {blur, brightness, composite (0–1)}
+    Higher composite = better quality clip.
+    """
+    dur  = max(1.0, end - start)
+    raw_scores = []
+    for qi, frac in enumerate([0.25, 0.75]):
+        qt = start + dur * frac
+        tp = f"tmp_{sid}_qs_{seg_idx}_{qi}.jpg"
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-ss", f"{qt:.2f}", "-i", src_path,
+                 "-vframes", "1", "-vf", "scale=160:-1", "-q:v", "5", tp],
+                capture_output=True, timeout=8,
+            )
+            if os.path.exists(tp):
+                arr  = np.array(Image.open(tp).convert("L"), dtype=np.float32)
+                raw_scores.append({
+                    "blur": _laplacian_var(arr),
+                    "br"  : float(np.mean(arr)),
+                })
+                try: os.remove(tp)
+                except Exception: pass
+        except Exception:
+            pass
+
+    if not raw_scores:
+        return {"blur": 0.0, "brightness": 128.0, "composite": 0.5}
+
+    avg_blur = float(np.mean([s["blur"] for s in raw_scores]))
+    avg_br   = float(np.mean([s["br"]   for s in raw_scores]))
+    blur_n   = min(1.0, avg_blur / 600.0)
+    br_n     = 1.0 - abs(avg_br - 135.0) / 135.0
+    composite = blur_n * 0.65 + max(0.0, br_n) * 0.35
+    return {
+        "blur"      : round(avg_blur, 1),
+        "brightness": round(avg_br, 1),
+        "composite" : round(min(1.0, max(0.0, composite)), 3),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPERS — AI Director (Claude API)
+# ─────────────────────────────────────────────────────────────────────────────
+def parse_prompt_to_render_plan(
+    prompt: str,
+    segments: list,
+    captions: list,
+    api_key: str,
+    durasi_target: int = 30,
+) -> dict:
+    """
+    Call Claude API to produce a render plan from a director prompt.
+    Returns dict: segment_order, hook_duration, detail_duration,
+                  transition, color_grade, reasoning.
+    """
+    try:
+        import anthropic, json
+
+        client   = anthropic.Anthropic(api_key=api_key)
+        segs_txt = "\n".join([
+            f"  [{i}] {s['src_name']} "
+            f"[{s['start']:.1f}s–{s['end']:.1f}s · {s['duration']:.1f}s] "
+            f"skor={s.get('score', {}).get('composite', 0.5):.2f}"
+            for i, s in enumerate(segments)
+        ])
+        caps_txt = "\n".join([
+            f"  Caption {i+1}: {c}" for i, c in enumerate(captions)
+        ])
+
+        msg = f"""Kamu adalah direktur video properti profesional untuk konten TikTok & Instagram.
+
+Instruksi user:
+{prompt}
+
+Segmen video tersedia ({len(segments)} segmen, skor 0–1 = kualitas visual):
+{segs_txt}
+
+Caption yang akan dipakai (dari input user, jangan diubah):
+{caps_txt}
+
+Target durasi: {durasi_target} detik (maksimum 60 detik).
+
+Aturan:
+- Segmen skor tinggi (≥0.6) → prioritas depan / posisi kunci
+- Segmen skor rendah (<0.3) → taruh di tengah atau skip jika terlalu banyak
+- hook_duration: 5–8 detik (klip pertama, kesan pertama paling penting)
+- detail_duration: 3–6 detik
+- Sesuaikan color grade dengan tone instruksi
+- Total durasi: sum(hook + detail × (n-1)) ≤ {durasi_target} detik
+
+Balas HANYA JSON valid ini, tanpa teks lain:
+{{
+  "segment_order": [indeks 0-based sesuai urutan render],
+  "hook_duration": 6.0,
+  "detail_duration": 4.0,
+  "transition": "Crossfade",
+  "color_grade": {{
+    "aktif": true,
+    "brightness": 1.05,
+    "contrast": 1.15,
+    "saturation": 1.10,
+    "sharpness": 1.20
+  }},
+  "reasoning": "penjelasan singkat max 1 kalimat"
+}}"""
+
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=600,
+            messages=[{"role": "user", "content": msg}],
+        )
+        text = resp.content[0].text.strip()
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+            text = text.split("```")[0].strip()
+
+        plan  = json.loads(text)
+        n     = len(segments)
+        order = [i for i in plan.get("segment_order", []) if isinstance(i, int) and 0 <= i < n]
+        for i in range(n):
+            if i not in order:
+                order.append(i)
+        plan["segment_order"] = order
+        return plan
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def apply_render_plan_to_segments(segments: list, plan: dict,
+                                   max_dur: int = 60) -> list:
+    """
+    Reorder segments + adjust clip durations based on render plan.
+    Trims total duration to max_dur seconds.
+    """
+    order      = plan.get("segment_order", list(range(len(segments))))
+    hook_dur   = float(plan.get("hook_duration",   6.0))
+    detail_dur = float(plan.get("detail_duration", 4.0))
+
+    reordered = []
+    for rank, idx in enumerate(order):
+        if idx >= len(segments):
+            continue
+        s    = dict(segments[idx])
+        want = hook_dur if rank == 0 else detail_dur
+        avail = s["end"] - s["start"]
+        actual = min(want, avail)
+        s["end"]      = round(s["start"] + actual, 2)
+        s["duration"] = round(actual, 2)
+        s["seg_idx"]  = rank
+        reordered.append(s)
+
+    total, trimmed = 0.0, []
+    for s in reordered:
+        if total >= max_dur:
+            break
+        remaining = max_dur - total
+        if s["duration"] > remaining:
+            s = dict(s)
+            s["end"]      = round(s["start"] + remaining, 2)
+            s["duration"] = round(remaining, 2)
+        trimmed.append(s)
+        total += s["duration"]
+    return trimmed
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SESSION STATE
 # ─────────────────────────────────────────────────────────────────────────────
 if "pass1_ready"   not in st.session_state: st.session_state.pass1_ready   = False
@@ -1057,6 +1266,7 @@ if "trim_open_vcs" not in st.session_state: st.session_state.trim_open_vcs = []
 if "input_mode"    not in st.session_state: st.session_state.input_mode    = "video"
 if "photo_paths"   not in st.session_state: st.session_state.photo_paths   = []
 if "trim_temp_raw" not in st.session_state: st.session_state.trim_temp_raw = []
+if "render_plan"   not in st.session_state: st.session_state.render_plan   = {}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1129,6 +1339,7 @@ if btn_full and has_input:
     st.session_state.pass2_done    = False
     st.session_state.video_bytes   = None
     st.session_state.input_mode    = input_mode
+    st.session_state.render_plan   = {}
 
     if input_mode == "video":
         with st.status("🔍 Menganalisis video...", expanded=True) as status:
@@ -1178,7 +1389,41 @@ if btn_full and has_input:
                 st.session_state.trim_open_vcs     = open_vcs
                 st.session_state["trim_fin_paths"] = fin_paths
                 st.session_state["trim_temp_raw"]  = temp_raw
-                status.update(label=f"✅ {len(segments)} segmen siap di-preview", state="complete")
+
+                # ── Score kualitas visual tiap segmen ─────────────────────────
+                st.write("🔍 Scoring kualitas visual segmen...")
+                scored_segs = []
+                for seg in st.session_state.trim_segments:
+                    sc  = score_segment(
+                        seg["src_path"], seg["start"], seg["end"],
+                        SID, seg["seg_idx"],
+                    )
+                    seg = dict(seg)
+                    seg["score"] = sc
+                    scored_segs.append(seg)
+                st.session_state.trim_segments = scored_segs
+
+                # ── AI Director (jika prompt + API key diisi) ─────────────────
+                if use_ai_director:
+                    st.write("🤖 AI Director menganalisis...")
+                    preview_caps = split_description_to_captions(deskripsi, n_caption)
+                    plan = parse_prompt_to_render_plan(
+                        director_prompt, scored_segs, preview_caps,
+                        anthropic_key, durasi_target,
+                    )
+                    if "error" in plan:
+                        st.warning(f"⚠️ AI Director gagal: {plan['error']}. Pakai urutan default.")
+                        st.session_state.render_plan = {}
+                    else:
+                        st.session_state.render_plan   = plan
+                        st.session_state.trim_segments = apply_render_plan_to_segments(
+                            scored_segs, plan, durasi_target,
+                        )
+                        st.write(f"✅ AI: _{plan.get('reasoning', 'Render plan diterapkan.')}_")
+                else:
+                    st.session_state.render_plan = {}
+
+                status.update(label=f"✅ {len(st.session_state.trim_segments)} segmen siap di-preview", state="complete")
             except Exception as e:
                 status.update(label=f"❌ {e}", state="error")
                 st.exception(e)
@@ -1260,12 +1505,23 @@ if st.session_state.trim_segments and not st.session_state.pass1_ready:
     if mode == "photo":
         st.info("✨ Ken Burns Effect (slow zoom-in 100% → 110%) akan diterapkan saat render.")
 
+    # ── Tampilkan render plan AI jika ada ─────────────────────────────────────
+    _rp = st.session_state.get("render_plan", {})
+    if _rp and not _rp.get("error"):
+        st.info(
+            f"🤖 **AI Director** · Transisi: `{_rp.get('transition','—')}` · "
+            f"Hook: `{_rp.get('hook_duration','—')}s` · "
+            f"Detail: `{_rp.get('detail_duration','—')}s`  \n"
+            f"_{_rp.get('reasoning','')}_"
+        )
+
     N_COLS = 3
-    rows   = [segs[i:i+N_COLS] for i in range(0, len(segs), N_COLS)]
+    indexed = list(enumerate(segs))
+    rows    = [indexed[i:i+N_COLS] for i in range(0, len(indexed), N_COLS)]
 
     for row in rows:
         cols = st.columns(N_COLS)
-        for col, s in zip(cols, row):
+        for col, (pos, s) in zip(cols, row):
             with col:
                 if mode == "video":
                     src     = s.get("src_path", "")
@@ -1280,9 +1536,32 @@ if st.session_state.trim_segments and not st.session_state.pass1_ready:
                     else:
                         st.markdown("🎬")
 
+                    # Score badge
+                    sc = s.get("score", {})
+                    if sc:
+                        cv = sc.get("composite", 0.5)
+                        em = "🟢" if cv >= 0.6 else "🟡" if cv >= 0.35 else "🔴"
+                        st.caption(f"{em} Skor: **{cv:.2f}**")
+
                     st.caption("**#{}** {}  \n{:.1f}s – {:.1f}s · **{:.1f}s**".format(
-                        idx + 1, s["src_name"][:16],
+                        pos + 1, s["src_name"][:16],
                         s["start"], s["end"], s["duration"]))
+
+                    # Reorder buttons
+                    rb1, rb2 = st.columns(2)
+                    if rb1.button("▲", key=f"up_{pos}",
+                                  use_container_width=True, disabled=(pos == 0)):
+                        sl = list(st.session_state.trim_segments)
+                        sl[pos], sl[pos - 1] = sl[pos - 1], sl[pos]
+                        st.session_state.trim_segments = sl
+                        st.rerun()
+                    if rb2.button("▼", key=f"dn_{pos}",
+                                  use_container_width=True,
+                                  disabled=(pos == len(segs) - 1)):
+                        sl = list(st.session_state.trim_segments)
+                        sl[pos], sl[pos + 1] = sl[pos + 1], sl[pos]
+                        st.session_state.trim_segments = sl
+                        st.rerun()
 
                     with st.expander("▶ Play clip"):
                         if not os.path.exists(mini_p):
@@ -1386,11 +1665,15 @@ if st.session_state.trim_approved and not st.session_state.pass1_ready:
 
             # ── Gabungkan dengan transisi ──────────────────────────────────────
             st.write("🔗 Menggabungkan...")
+            _rp_trans = st.session_state.get("render_plan", {}).get("transition", "")
+            effective_transition = _rp_trans if _rp_trans else jenis_transisi
+            if _rp_trans:
+                st.write(f"  🤖 Transisi dari AI: **{effective_transition}**")
             if len(clips_916) == 1:
                 base = clips_916[0]
-            elif jenis_transisi == "Crossfade":
+            elif effective_transition == "Crossfade":
                 base = crossfade_concat(clips_916, fade_d=fade_dur)
-            elif jenis_transisi == "Fade to Black":
+            elif effective_transition == "Fade to Black":
                 faded = []
                 for i, c in enumerate(clips_916):
                     fx = ([] if i == 0 else [FadeIn(fade_dur)]) + [FadeOut(fade_dur)]
@@ -1427,15 +1710,29 @@ if st.session_state.trim_approved and not st.session_state.pass1_ready:
             # ── Lanjut Pass 2 ─────────────────────────────────────────────────
             status.update(label="⏳ Pass 2: Overlay caption...")
             st.write("## ✍️ Pass 2: Overlay Caption")
+            # ── Terapkan color grade dari render plan (jika ada) ──────────────
+            _rp_cg = st.session_state.get("render_plan", {}).get("color_grade", {})
+            eff_do_grade   = bool(_rp_cg.get("aktif",     do_grade))    if _rp_cg else do_grade
+            eff_brightness = float(_rp_cg.get("brightness", brightness)) if _rp_cg else brightness
+            eff_contrast   = float(_rp_cg.get("contrast",   contrast))   if _rp_cg else contrast
+            eff_saturation = float(_rp_cg.get("saturation", saturation)) if _rp_cg else saturation
+            eff_sharpness  = float(_rp_cg.get("sharpness",  sharpness))  if _rp_cg else sharpness
+            if _rp_cg:
+                st.write(
+                    f"  🤖 Color grade dari AI: "
+                    f"br={eff_brightness:.2f} co={eff_contrast:.2f} "
+                    f"sa={eff_saturation:.2f} sh={eff_sharpness:.2f}"
+                )
+
             ok, captions, err = run_pass2(
                 pass1_path=pass1_path, out_path=out_path,
                 deskripsi=deskripsi, n_caption=n_caption,
                 detail_colors=detail_colors,
                 cta_nama=cta_nama, cta_wa=cta_wa,
                 cta_dur=cta_dur, cta_label=cta_label,
-                do_grade=do_grade, brightness=brightness,
-                contrast=contrast, saturation=saturation,
-                sharpness=sharpness, bgm_file=bgm_file,
+                do_grade=eff_do_grade, brightness=eff_brightness,
+                contrast=eff_contrast, saturation=eff_saturation,
+                sharpness=eff_sharpness, bgm_file=bgm_file,
                 bgm_volume=bgm_volume, orig_vol=orig_vol,
                 OUT_W=OUT_W, OUT_H=OUT_H, logo_pil=logo_pil,
                 caption_align=caption_align,

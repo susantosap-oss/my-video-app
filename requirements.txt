@@ -6,6 +6,11 @@
 # ── Core Web App ───────────────────────────────────────────────────
 streamlit>=1.35.0
 
+# ── FastAPI + Full AI Frontend ──────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+
 # ── Video Processing ───────────────────────────────────────────────
 moviepy>=2.0.0
 imageio>=2.34.0
@@ -18,6 +23,12 @@ numpy>=1.26.0
 # ── NLP Engine (prioritas: NLTK → TextBlob → Regex builtin) ────────
 nltk>=3.8.1
 textblob>=0.18.0
+
+# ── AI Director (VidGen.py — Streamlit mode) ───────────────────────
+anthropic>=0.40.0
+
+# ── Full AI Mode (FastAPI mode — server-side key, free tier) ────────
+google-generativeai>=0.8.0
 
 # ── Utilities ──────────────────────────────────────────────────────
 decorator>=4.4.2

@@ -1,0 +1,2064 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mansion Video Generator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            gold: {
+              300: '#fde68a',
+              400: '#fbbf24',
+              500: '#f59e0b',
+              600: '#d97706',
+            },
+            dark: {
+              900: '#0a0a0a',
+              800: '#111111',
+              700: '#1a1a1a',
+              600: '#222222',
+              500: '#2a2a2a',
+              400: '#333333',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { background: #0a0a0a; }
+
+    .drop-zone {
+      border: 2px dashed #2a2a2a;
+      transition: all .2s ease;
+    }
+    .drop-zone.dragover {
+      border-color: #f59e0b;
+      background: rgba(245,158,11,.06);
+    }
+    .clip-chip {
+      animation: fadeSlide .25s ease forwards;
+    }
+    @keyframes fadeSlide {
+      from { opacity:0; transform:translateY(6px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    .progress-bar-fill {
+      transition: width .4s ease;
+    }
+    .card {
+      background: #111111;
+      border: 1px solid #222222;
+      border-radius: .75rem;
+    }
+    .input-base {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      color: #f9fafb;
+      border-radius: .5rem;
+      padding: .5rem .75rem;
+      width: 100%;
+      outline: none;
+      transition: border-color .2s;
+    }
+    .input-base:focus { border-color: #f59e0b; }
+    .input-base::placeholder { color: #4b5563; }
+
+    .btn-gold {
+      background: #f59e0b;
+      color: #0a0a0a;
+      font-weight: 700;
+      border-radius: .5rem;
+      padding: .6rem 1.25rem;
+      transition: background .2s, transform .1s;
+      cursor: pointer;
+    }
+    .btn-gold:hover  { background: #fbbf24; }
+    .btn-gold:active { transform: scale(.97); }
+    .btn-gold:disabled { background: #333; color:#555; cursor:not-allowed; }
+
+    .btn-outline {
+      border: 1px solid #2a2a2a;
+      color: #9ca3af;
+      border-radius: .5rem;
+      padding: .5rem 1rem;
+      transition: all .2s;
+      cursor: pointer;
+    }
+    .btn-outline:hover { border-color: #f59e0b; color: #f59e0b; }
+
+    .toggle-pill {
+      position: relative; display: inline-flex; align-items: center;
+      width: 44px; height: 24px; border-radius: 9999px;
+      background: #2a2a2a; cursor: pointer; transition: background .2s;
+    }
+    .toggle-pill.on { background: #f59e0b; }
+    .toggle-pill .knob {
+      position: absolute; width: 18px; height: 18px; border-radius: 50%;
+      background: white; left: 3px; transition: left .2s;
+    }
+    .toggle-pill.on .knob { left: 23px; }
+
+    .spec-badge {
+      display: inline-block;
+      border: 1px solid #333;
+      border-radius: .375rem;
+      padding: .15rem .5rem;
+      font-size: .75rem;
+      color: #9ca3af;
+    }
+    .spec-badge.gold { border-color: #f59e0b44; color: #f59e0b; }
+
+    .log-line { font-family: monospace; font-size: .78rem; color: #6b7280; }
+    .log-line.info   { color: #9ca3af; }
+    .log-line.success{ color: #34d399; }
+    .log-line.error  { color: #f87171; }
+
+    select.input-base option { background: #1a1a1a; }
+
+    ::-webkit-scrollbar { width:5px; }
+    ::-webkit-scrollbar-track { background:#111; }
+    ::-webkit-scrollbar-thumb { background:#333; border-radius:4px; }
+  </style>
+</head>
+<body class="min-h-screen text-gray-100">
+
+<!-- ── NAV ────────────────────────────────────────────────────────────────── -->
+<nav class="border-b border-dark-500 px-6 py-4 flex items-center justify-between sticky top-0 z-50" style="background:#0a0a0aee; backdrop-filter:blur(8px);">
+  <div class="flex items-center gap-3">
+    <span class="text-gold-400 text-xl">🎬</span>
+    <span id="app-title" class="font-bold text-white tracking-tight">Mansion <span class="text-yellow-400">Video</span> Generator</span>
+  </div>
+  <div class="flex items-center gap-3 flex-wrap justify-end">
+    <span id="usage-counter"></span>
+    <span id="user-badge" class="text-xs text-gray-500"></span>
+    <span class="text-xs text-gray-600" id="sid-display">—</span>
+    <button onclick="openTutorial()" class="text-xs text-gray-400 hover:text-yellow-400 transition-colors px-2 py-1">📖 Tutorial</button>
+    <button onclick="newSession()" class="btn-outline text-sm px-3 py-1">+ New</button>
+    <button onclick="doLogout()" class="text-xs text-gray-600 hover:text-red-400 transition-colors px-2 py-1">Logout</button>
+  </div>
+</nav>
+
+<!-- ── MAIN ───────────────────────────────────────────────────────────────── -->
+<main class="max-w-5xl mx-auto px-4 py-8 space-y-6">
+
+  <!-- ═══ SECTION 1: Upload ═══════════════════════════════════════════════ -->
+  <div class="card p-6">
+    <div class="flex items-center gap-2 mb-4">
+      <span class="text-gold-400">📁</span>
+      <h2 class="font-semibold text-white">Upload Media</h2>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex gap-1 mb-4 p-1 rounded-lg" style="background:#1a1a1a; width:fit-content;">
+      <button onclick="switchTab('video')" id="tab-video" class="tab-btn px-4 py-1.5 rounded-md text-sm font-medium transition-all">🎬 Video</button>
+      <button onclick="switchTab('photo')" id="tab-photo" class="tab-btn px-4 py-1.5 rounded-md text-sm font-medium transition-all">🖼️ Photo</button>
+    </div>
+
+    <!-- Video upload -->
+    <div id="panel-video">
+      <div id="drop-video" class="drop-zone rounded-xl p-8 text-center cursor-pointer" onclick="document.getElementById('input-video').click()">
+        <div class="text-3xl mb-2">🎥</div>
+        <p class="text-gray-400 text-sm">Drop video clips here or <span class="text-gold-400 underline">browse</span></p>
+        <p class="text-gray-600 text-xs mt-1">MP4 / MOV / AVI — multiple files</p>
+      </div>
+      <input type="file" id="input-video" accept=".mp4,.mov,.avi" multiple class="hidden" onchange="handleVideoUpload(this.files)" />
+      <div id="clip-list" class="mt-3 space-y-2"></div>
+    </div>
+
+    <!-- Photo upload -->
+    <div id="panel-photo" class="hidden">
+      <div id="drop-photo" class="drop-zone rounded-xl p-8 text-center cursor-pointer" onclick="document.getElementById('input-photo').click()">
+        <div class="text-3xl mb-2">🖼️</div>
+        <p class="text-gray-400 text-sm">Drop photos here or <span class="text-gold-400 underline">browse</span></p>
+        <p class="text-gray-600 text-xs mt-1">JPG / PNG / WEBP — maks 6 foto</p>
+      </div>
+      <input type="file" id="input-photo" accept=".jpg,.jpeg,.png,.webp" multiple class="hidden" onchange="handlePhotoUpload(this.files)" />
+      <div id="photo-list" class="mt-3 space-y-2"></div>
+    </div>
+  </div>
+
+  <!-- ═══ SECTION 2: Content ══════════════════════════════════════════════ -->
+  <div class="card p-6">
+    <div class="flex items-center gap-2 mb-4">
+      <span class="text-gold-400">📝</span>
+      <h2 class="font-semibold text-white">Deskripsi Properti</h2>
+    </div>
+    <textarea id="description" rows="4" class="input-base resize-none"
+      placeholder="Rumah 1 Lantai Citraland Surabaya. LT 150m2 KT 3. Disain Modern dengan Rooftop. Harga Rp 5.5 M nego."></textarea>
+    <div class="mt-3 flex items-center gap-4">
+      <label class="text-sm text-gray-400">Jumlah Caption</label>
+      <input type="range" id="n-captions" min="1" max="5" value="3" class="accent-yellow-500 w-32"
+             oninput="document.getElementById('n-cap-val').textContent=this.value" />
+      <span id="n-cap-val" class="text-gold-400 font-bold text-sm w-4">3</span>
+    </div>
+  </div>
+
+  <!-- ═══ SECTION 3: AI Config ════════════════════════════════════════════ -->
+  <div class="card p-6">
+    <div class="flex items-center justify-between mb-4">
+      <div class="flex items-center gap-2">
+        <span class="text-gold-400">🤖</span>
+        <h2 class="font-semibold text-white">Full AI Mode</h2>
+        <span class="text-xs text-gray-500 bg-dark-500 px-2 py-0.5 rounded-full">trim · caption · color · font · transisi</span>
+      </div>
+      <div class="toggle-pill" id="ai-toggle" onclick="toggleAI()">
+        <div class="knob"></div>
+      </div>
+    </div>
+    <span id="ai-locked-badge" class="hidden text-xs text-gray-500 bg-dark-500 px-2 py-0.5 rounded-full">🔒 Upgrade untuk Full AI</span>
+
+    <div id="ai-panel" class="space-y-3">
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">Instruksi Gaya Video</label>
+        <textarea id="style-prompt" rows="3" class="input-base resize-none"
+          placeholder="Contoh: Video properti modern elegan, hook kuat dari eksterior terbaik, interior di tengah, tutup dengan view lokasi. Tone hangat dan premium, target TikTok & Instagram."></textarea>
+      </div>
+      <!-- AI quota status badge -->
+      <div id="ai-quota-status" class="flex items-center gap-2 text-xs px-3 py-2 rounded-lg" style="background:#1a1a1a;">
+        <span id="quota-dot" class="w-2 h-2 rounded-full bg-gray-600"></span>
+        <span id="quota-msg" class="text-gray-500">Status quota belum dicek</span>
+      </div>
+
+      <!-- Fallback: user API key (muncul jika quota server habis) -->
+      <div id="user-key-panel" class="hidden rounded-lg p-4 space-y-3" style="background:#1a1a1a; border:1px solid #7f1d1d;">
+        <div class="flex items-center justify-between">
+          <p class="text-sm font-medium text-red-400">🔑 Gunakan API Key Sendiri</p>
+          <button onclick="hideUserKeyPanel()" class="text-gray-600 hover:text-white text-sm">✕ Tutup</button>
+        </div>
+        <p class="text-xs text-gray-500">Free tier server habis. Gunakan key Anda sendiri — tidak akan disimpan di server.</p>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button onclick="selectProvider('gemini')" id="btn-prov-gemini"
+                  class="provider-btn text-sm py-2 px-3 rounded-lg border border-dark-400 text-gray-400 transition-all hover:border-yellow-500">
+            <div class="font-medium">Gemini</div>
+            <div class="text-xs text-gray-600">Free 1.5M tok/min</div>
+          </button>
+          <button onclick="selectProvider('anthropic')" id="btn-prov-anthropic"
+                  class="provider-btn text-sm py-2 px-3 rounded-lg border border-dark-400 text-gray-400 transition-all hover:border-yellow-500">
+            <div class="font-medium">Anthropic</div>
+            <div class="text-xs text-gray-600">~$0.001/request</div>
+          </button>
+        </div>
+
+        <div id="get-key-info" class="hidden text-xs rounded-lg p-3 space-y-1.5" style="background:#0d0d0d;">
+        </div>
+
+        <input type="password" id="user-api-key" class="input-base text-sm"
+               placeholder="Paste API key di sini..." />
+      </div>
+
+      <div class="flex gap-3">
+        <button onclick="getAISpec()" id="btn-ai-spec" class="btn-gold flex-1" disabled>
+          ✨ Generate AI Spec
+        </button>
+        <button onclick="clearSpec()" class="btn-outline text-sm">Clear</button>
+      </div>
+
+      <!-- Spec Preview -->
+      <div id="spec-preview" class="hidden">
+        <div class="border border-dark-400 rounded-lg overflow-hidden">
+          <button onclick="toggleSpecPreview()" class="w-full flex items-center justify-between px-4 py-2.5 text-sm font-medium"
+                  style="background:#1a1a1a;">
+            <span class="text-gray-300">📋 AI Spec Preview</span>
+            <span id="spec-arrow" class="text-gray-500">▼</span>
+          </button>
+          <div id="spec-body" class="hidden px-4 pb-4 pt-2 space-y-3" style="background:#151515;">
+
+            <!-- Captions -->
+            <div>
+              <p class="text-xs text-gray-500 mb-2">Captions</p>
+              <div id="spec-captions" class="space-y-1.5"></div>
+            </div>
+
+            <!-- Transition + Color Grade -->
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <p class="text-xs text-gray-500 mb-1.5">Transisi</p>
+                <div id="spec-transition" class="text-sm text-gray-300"></div>
+              </div>
+              <div>
+                <p class="text-xs text-gray-500 mb-1.5">Color Grade</p>
+                <div id="spec-grade" class="text-sm text-gray-300 space-y-0.5"></div>
+              </div>
+            </div>
+
+            <!-- Font + Reasoning -->
+            <div>
+              <p class="text-xs text-gray-500 mb-1">Font</p>
+              <p id="spec-font" class="text-sm text-gray-300"></p>
+            </div>
+            <div>
+              <p class="text-xs text-gray-500 mb-1">Reasoning AI</p>
+              <p id="spec-reasoning" class="text-sm text-gray-400 italic"></p>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ SECTION 4: Manual Controls (outside AI scope) ═══════════════════ -->
+  <div class="card p-6">
+    <div class="flex items-center gap-2 mb-5">
+      <span class="text-gold-400">🎛️</span>
+      <h2 class="font-semibold text-white">Manual Controls</h2>
+      <span class="text-xs text-gray-600 bg-dark-500 px-2 py-0.5 rounded-full">selalu manual · di luar AI scope</span>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-5">
+
+      <!-- BGM -->
+      <div class="space-y-3">
+        <h3 class="text-sm font-medium text-gray-300 flex items-center gap-1.5">🎵 Background Music</h3>
+        <div class="drop-zone rounded-lg p-4 text-center cursor-pointer text-sm" onclick="document.getElementById('input-bgm').click()">
+          <p id="bgm-name" class="text-gray-500">Upload MP3 / WAV</p>
+        </div>
+        <input type="file" id="input-bgm" accept=".mp3,.wav" class="hidden" onchange="handleBGM(this.files)" />
+        <div>
+          <div class="flex justify-between text-xs text-gray-500 mb-1"><span>Volume BGM</span><span id="bgm-vol-val">0.50</span></div>
+          <input type="range" id="bgm-volume" min="0.1" max="1.0" step="0.05" value="0.5" class="accent-yellow-500 w-full"
+                 oninput="document.getElementById('bgm-vol-val').textContent=parseFloat(this.value).toFixed(2)" />
+        </div>
+        <div>
+          <div class="flex justify-between text-xs text-gray-500 mb-1"><span>Volume Video</span><span id="orig-vol-val">0.80</span></div>
+          <input type="range" id="orig-vol" min="0.0" max="1.0" step="0.05" value="0.8" class="accent-yellow-500 w-full"
+                 oninput="document.getElementById('orig-vol-val').textContent=parseFloat(this.value).toFixed(2)" />
+        </div>
+      </div>
+
+      <!-- Duration -->
+      <div class="space-y-3">
+        <h3 class="text-sm font-medium text-gray-300 flex items-center gap-1.5">⏱️ Durasi Target</h3>
+        <div class="text-center">
+          <span id="dur-val" class="text-4xl font-bold text-gold-400">30</span>
+          <span class="text-gray-500 text-sm ml-1">detik</span>
+        </div>
+        <input type="range" id="duration" min="15" max="60" value="30" class="accent-yellow-500 w-full"
+               oninput="document.getElementById('dur-val').textContent=this.value" />
+        <div class="flex justify-between text-xs text-gray-600"><span>15s</span><span>60s</span></div>
+        <p id="dur-cap-note" class="hidden text-xs text-yellow-600"></p>
+      </div>
+
+      <!-- Resolution -->
+      <div class="space-y-3">
+        <h3 class="text-sm font-medium text-gray-300 flex items-center gap-1.5">📐 Resolusi Output</h3>
+        <div class="space-y-2">
+          <label class="flex items-center gap-2.5 cursor-pointer">
+            <input type="radio" name="resolution" value="360p  (202×360)" class="accent-yellow-500" />
+            <span class="text-sm text-gray-400">360p <span class="text-gray-600 text-xs">202×360</span></span>
+          </label>
+          <label class="flex items-center gap-2.5 cursor-pointer">
+            <input type="radio" name="resolution" value="720p  (720×1280) Best" class="accent-yellow-500" checked />
+            <span class="text-sm text-gray-300">720p <span class="text-gold-500 text-xs">Best ★</span></span>
+          </label>
+          <label class="flex items-center gap-2.5 cursor-pointer">
+            <input type="radio" name="resolution" value="1080p (1080×1920)" class="accent-yellow-500" />
+            <span class="text-sm text-gray-400">1080p <span class="text-gray-600 text-xs">1080×1920</span></span>
+          </label>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══ SECTION 5: CTA ══════════════════════════════════════════════════ -->
+  <div class="card p-6">
+    <div class="flex items-center gap-2 mb-4">
+      <span class="text-gold-400">📞</span>
+      <h2 class="font-semibold text-white">CTA (Contact)</h2>
+    </div>
+    <div class="grid sm:grid-cols-2 md:grid-cols-4 gap-3">
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">Label</label>
+        <input type="text" id="cta-label" class="input-base" value="Hubungi :" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">Nama Agen</label>
+        <input type="text" id="cta-nama" class="input-base" placeholder="Nama Agen" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">Nomor WhatsApp</label>
+        <input type="text" id="cta-wa" class="input-base" placeholder="0812-xxxx-xxxx" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">Durasi CTA (detik terakhir)</label>
+        <input type="number" id="cta-dur" class="input-base" value="4" min="2" max="8" />
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ SECTION 6: Logo Upload ══════════════════════════════════════════ -->
+  <div class="card p-6">
+    <div class="flex items-center gap-2 mb-4">
+      <span class="text-gold-400">🖼️</span>
+      <h2 class="font-semibold text-white">Logo</h2>
+    </div>
+    <div class="flex items-center gap-4">
+      <div class="drop-zone rounded-lg p-4 text-center cursor-pointer text-sm flex-1" onclick="document.getElementById('input-logo').click()">
+        <p id="logo-name" class="text-gray-500">Upload Logo PNG (opsional)</p>
+      </div>
+      <input type="file" id="input-logo" accept=".png" class="hidden" onchange="handleLogo(this.files)" />
+      <div id="logo-preview" class="hidden">
+        <img id="logo-img" class="w-16 h-16 object-contain rounded border border-dark-500" />
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ SECTION 7: Manual Caption Colors (non-AI mode) ══════════════════ -->
+  <div id="manual-caption-section" class="card p-6">
+    <div class="flex items-center gap-2 mb-4">
+      <span class="text-gold-400">🎨</span>
+      <h2 class="font-semibold text-white">Caption Style</h2>
+      <span class="text-xs text-gray-600">(dipakai saat Full AI Mode OFF)</span>
+    </div>
+    <div class="grid sm:grid-cols-2 gap-3">
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">Caption Alignment</label>
+        <select id="caption-align" class="input-base">
+          <option value="Center">Center</option>
+          <option value="Left">Left (+ Gold line)</option>
+          <option value="Right">Right (+ Gold line)</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">Warna Caption 2–5</label>
+        <div class="flex gap-2 flex-wrap mt-1">
+          <div class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full" style="background:#ffd700"></span><span class="text-xs text-gray-400">Gold (HOOK)</span></div>
+          <select id="detail-color-1" class="input-base text-xs py-1 w-auto">
+            <option value="White" selected>White</option>
+            <option value="Silver">Silver</option>
+            <option value="Champagne">Champagne</option>
+            <option value="Rose Gold">Rose Gold</option>
+            <option value="Gold">Gold</option>
+          </select>
+          <select id="detail-color-2" class="input-base text-xs py-1 w-auto">
+            <option value="Silver" selected>Silver</option>
+            <option value="White">White</option>
+            <option value="Champagne">Champagne</option>
+            <option value="Rose Gold">Rose Gold</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <!-- Transition (manual) -->
+    <div class="mt-3 grid sm:grid-cols-2 gap-3">
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">Transisi Antar Klip</label>
+        <select id="transition" class="input-base">
+          <option value="Crossfade">Crossfade</option>
+          <option value="Fade to Black">Fade to Black</option>
+          <option value="Tanpa Transisi">Tanpa Transisi</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">Durasi Transisi (detik)</label>
+        <input type="range" id="fade-dur" min="0.2" max="1.5" step="0.1" value="0.4" class="accent-yellow-500 w-full mt-2"
+               oninput="document.getElementById('fade-val').textContent=parseFloat(this.value).toFixed(1)+'s'" />
+        <span id="fade-val" class="text-xs text-gray-500">0.4s</span>
+      </div>
+    </div>
+    <!-- Color grade (manual) -->
+    <div class="mt-3">
+      <div class="flex items-center gap-2 mb-2">
+        <label class="text-xs text-gray-500">Auto Color Grading</label>
+        <div class="toggle-pill" id="grade-toggle" onclick="toggleGrade()"><div class="knob"></div></div>
+      </div>
+      <div id="grade-sliders" class="hidden grid grid-cols-2 gap-3 mt-2">
+        <div><div class="flex justify-between text-xs text-gray-500 mb-1"><span>Brightness</span><span id="br-val">1.05</span></div>
+          <input type="range" id="brightness" min="0.7" max="1.5" step="0.05" value="1.05" class="accent-yellow-500 w-full"
+                 oninput="document.getElementById('br-val').textContent=parseFloat(this.value).toFixed(2)" /></div>
+        <div><div class="flex justify-between text-xs text-gray-500 mb-1"><span>Contrast</span><span id="co-val">1.10</span></div>
+          <input type="range" id="contrast" min="0.7" max="1.5" step="0.05" value="1.10" class="accent-yellow-500 w-full"
+                 oninput="document.getElementById('co-val').textContent=parseFloat(this.value).toFixed(2)" /></div>
+        <div><div class="flex justify-between text-xs text-gray-500 mb-1"><span>Saturation</span><span id="sa-val">1.05</span></div>
+          <input type="range" id="saturation" min="0.7" max="1.5" step="0.05" value="1.05" class="accent-yellow-500 w-full"
+                 oninput="document.getElementById('sa-val').textContent=parseFloat(this.value).toFixed(2)" /></div>
+        <div><div class="flex justify-between text-xs text-gray-500 mb-1"><span>Sharpness</span><span id="sh-val">1.10</span></div>
+          <input type="range" id="sharpness" min="0.7" max="2.0" step="0.05" value="1.10" class="accent-yellow-500 w-full"
+                 oninput="document.getElementById('sh-val').textContent=parseFloat(this.value).toFixed(2)" /></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ SECTION 8: Render Button ════════════════════════════════════════ -->
+  <div class="card p-6">
+    <button onclick="startRender()" id="btn-render" class="btn-gold w-full text-lg py-4 text-center" disabled>
+      🎬 Render Video
+    </button>
+
+    <!-- Progress -->
+    <div id="progress-section" class="hidden mt-5 space-y-3">
+      <div class="flex items-center justify-between text-sm">
+        <span id="progress-msg" class="text-gray-400">...</span>
+        <span id="progress-pct" class="text-gold-400 font-bold">0%</span>
+      </div>
+      <div class="w-full rounded-full h-2" style="background:#1a1a1a;">
+        <div id="progress-bar" class="progress-bar-fill h-2 rounded-full" style="width:0%; background: linear-gradient(90deg,#f59e0b,#fbbf24);"></div>
+      </div>
+      <div id="log-box" class="rounded-lg p-3 space-y-1 max-h-32 overflow-y-auto text-xs" style="background:#0d0d0d;">
+      </div>
+    </div>
+
+    <!-- Download -->
+    <div id="download-section" class="hidden mt-5 text-center space-y-3">
+      <div class="text-green-400 text-lg font-semibold">✅ Video Siap!</div>
+      <a id="download-link" href="#" download class="btn-gold inline-block px-8 py-3 text-base">
+        ⬇️ Download Video
+      </a>
+      <button onclick="resetRender()" class="btn-outline block mx-auto mt-2 text-sm px-6">Render Ulang</button>
+    </div>
+  </div>
+
+  <!-- ═══ INFO BERLANGGANAN (Trial user only) ════════════════════════════ -->
+  <div id="subscribe-info-section" class="hidden card p-6 border-yellow-900" style="border-color:#78350f">
+    <div class="flex items-center gap-2 mb-4">
+      <span class="text-yellow-400 text-lg">⭐</span>
+      <h2 class="font-semibold text-white">Upgrade ke Paket Berbayar</h2>
+    </div>
+    <!-- Tabel Paket -->
+    <div id="pkg-info-table" class="mb-4"></div>
+    <!-- Cara Subscribe -->
+    <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div>
+        <p class="text-xs text-gray-500 uppercase tracking-wider mb-2 font-medium">📋 Cara Berlangganan</p>
+        <pre id="info-howto" class="text-xs text-gray-300 whitespace-pre-wrap leading-relaxed"></pre>
+      </div>
+      <div>
+        <p class="text-xs text-gray-500 uppercase tracking-wider mb-2 font-medium">📌 Ketentuan</p>
+        <pre id="info-terms" class="text-xs text-gray-400 whitespace-pre-wrap leading-relaxed"></pre>
+      </div>
+    </div>
+    <div class="mt-4 pt-4 border-t border-dark-500 flex items-center gap-3">
+      <span class="text-xs text-gray-500">Hubungi kami:</span>
+      <a id="info-contact" href="#" target="_blank"
+         class="text-sm text-yellow-400 font-medium hover:underline">+62 081703133252</a>
+    </div>
+  </div>
+
+  <!-- ═══ GANTI PASSWORD (semua user) ════════════════════════════════════ -->
+  <div id="change-pw-section" class="hidden card p-6">
+    <button onclick="toggleChangePw()" class="flex items-center gap-2 w-full text-left">
+      <span class="text-gray-400">🔑</span>
+      <span class="text-sm font-medium text-gray-300">Ganti Password</span>
+      <span id="changepw-chevron" class="text-gray-600 ml-auto text-xs">▼</span>
+    </button>
+    <div id="changepw-body" class="hidden mt-4 space-y-3 max-w-xs">
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">Password Lama</label>
+        <input type="password" id="pw-old" class="input-base text-sm py-1.5" placeholder="••••••••" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">Password Baru</label>
+        <input type="password" id="pw-new" class="input-base text-sm py-1.5" placeholder="min 4 karakter" />
+      </div>
+      <div>
+        <label class="text-xs text-gray-500 mb-1 block">Konfirmasi Password Baru</label>
+        <input type="password" id="pw-confirm" class="input-base text-sm py-1.5" placeholder="ulangi password baru" />
+      </div>
+      <button onclick="submitChangePw()" class="btn-gold text-sm px-4 py-1.5">Simpan Password</button>
+      <p id="changepw-msg" class="hidden text-xs"></p>
+    </div>
+  </div>
+
+  <!-- ═══ ADMIN: Manajemen Subscriber (mansion_team + owner) ══════════════ -->
+  <div id="admin-users-section" class="hidden card p-6">
+    <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+      <h2 class="font-semibold text-white flex items-center gap-2">👥 Manajemen Subscriber</h2>
+      <div class="flex gap-2">
+        <button onclick="loadAdminUsers()" class="text-xs text-gray-500 hover:text-white transition-colors">↻ Refresh</button>
+        <button onclick="toggleAddForm()" class="btn-gold text-xs px-3 py-1.5">+ Tambah Subscriber</button>
+      </div>
+    </div>
+
+    <!-- Form Tambah Subscriber -->
+    <div id="add-user-form" class="hidden mb-5 p-4 rounded-lg border border-dark-500" style="background:#0f0f0f">
+      <p class="text-xs text-gray-400 font-medium mb-3 uppercase tracking-wider">Form Pendaftaran Subscriber</p>
+      <div class="grid grid-cols-2 gap-3 mb-3">
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">Username *</label>
+          <input id="new-username" class="input-base text-sm py-1.5" placeholder="username" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">Password *</label>
+          <input id="new-password" class="input-base text-sm py-1.5" placeholder="password" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">Email / No. WA</label>
+          <input id="new-email" class="input-base text-sm py-1.5" placeholder="email atau no WA" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">Paket *</label>
+          <select id="new-package" class="input-base text-sm py-1.5">
+            <option value="trial">Trial (gratis)</option>
+            <option value="basic">Basic</option>
+            <option value="lite">Lite</option>
+            <option value="pro">Pro</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="submitAddUser()" class="btn-gold text-sm px-4 py-1.5">Daftarkan</button>
+        <button onclick="toggleAddForm()" class="text-xs text-gray-500 hover:text-white px-3 py-1.5">Batal</button>
+      </div>
+      <p id="add-user-msg" class="hidden text-xs mt-2"></p>
+    </div>
+
+    <!-- Tabel User -->
+    <div id="user-table-wrap" class="overflow-x-auto">
+      <p class="text-xs text-gray-600">Memuat...</p>
+    </div>
+  </div>
+
+  <!-- ═══ ADMIN: Pengaturan Paket (owner only) ═════════════════════════════ -->
+  <div id="admin-packages-section" class="hidden card p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="font-semibold text-white flex items-center gap-2">⚙️ Pengaturan Paket</h2>
+      <button onclick="loadAdminPackages()" class="text-xs text-gray-500 hover:text-white transition-colors">↻ Refresh</button>
+    </div>
+    <div id="pkg-editor-wrap" class="space-y-2">
+      <p class="text-xs text-gray-600">Memuat...</p>
+    </div>
+    <p id="pkg-save-msg" class="hidden text-xs mt-3 text-center"></p>
+
+    <!-- Ketentuan & Cara Subscribe -->
+    <div class="mt-6 pt-5 border-t border-dark-500 space-y-4">
+      <h3 class="text-sm font-medium text-gray-300">📋 Info Berlangganan (tampil ke Trial user)</h3>
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">Cara Berlangganan</label>
+          <textarea id="setting-howto" rows="5" class="input-base text-sm resize-none"
+            placeholder="Langkah-langkah cara subscribe..."></textarea>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">Ketentuan</label>
+          <textarea id="setting-terms" rows="5" class="input-base text-sm resize-none"
+            placeholder="Syarat dan ketentuan berlangganan..."></textarea>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="flex-1">
+          <label class="text-xs text-gray-500 mb-1 block">Nomor WA / Kontak</label>
+          <input id="setting-contact" class="input-base text-sm py-1.5" placeholder="+62 08xxxxxxx" />
+        </div>
+        <button onclick="saveSettings()" class="btn-gold text-sm px-5 py-2 mt-5">Simpan Info</button>
+      </div>
+      <p id="settings-save-msg" class="hidden text-xs"></p>
+    </div>
+  </div>
+
+</main>
+
+<!-- ── FOOTER ──────────────────────────────────────────────────────────────── -->
+<footer class="text-center text-xs text-gray-700 py-8">
+  <span id="footer-text">Mansion Video Generator · Full AI Mode powered by Claude</span>
+</footer>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TUTORIAL MODAL
+═══════════════════════════════════════════════════════════════════════════ -->
+<div id="tutorial-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4" style="background:rgba(0,0,0,.85);backdrop-filter:blur(4px)">
+  <div class="w-full max-w-3xl rounded-xl border border-dark-500 flex flex-col" style="background:#111;max-height:90vh">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between px-6 py-4 border-b border-dark-500 flex-shrink-0">
+      <div class="flex items-center gap-2">
+        <span class="text-yellow-400 text-lg">📖</span>
+        <h2 class="font-bold text-white text-lg">Tutorial Penggunaan</h2>
+      </div>
+      <button onclick="closeTutorial()" class="text-gray-500 hover:text-white text-xl leading-none px-1">✕</button>
+    </div>
+
+    <!-- Tab Nav -->
+    <div class="flex gap-1 px-6 pt-4 pb-0 flex-shrink-0 overflow-x-auto">
+      <button onclick="switchTutorialTab('mulai')"    id="ttab-mulai"    class="ttab flex-shrink-0 px-3 py-1.5 rounded-t-lg text-xs font-medium transition-all">🚀 Mulai</button>
+      <button onclick="switchTutorialTab('upload')"   id="ttab-upload"   class="ttab flex-shrink-0 px-3 py-1.5 rounded-t-lg text-xs font-medium transition-all">📁 Upload</button>
+      <button onclick="switchTutorialTab('ai')"       id="ttab-ai"       class="ttab flex-shrink-0 px-3 py-1.5 rounded-t-lg text-xs font-medium transition-all">🤖 Full AI</button>
+      <button onclick="switchTutorialTab('manual')"   id="ttab-manual"   class="ttab flex-shrink-0 px-3 py-1.5 rounded-t-lg text-xs font-medium transition-all">🎛️ Manual</button>
+      <button onclick="switchTutorialTab('render')"   id="ttab-render"   class="ttab flex-shrink-0 px-3 py-1.5 rounded-t-lg text-xs font-medium transition-all">⚙️ Render</button>
+      <button onclick="switchTutorialTab('unduh')"    id="ttab-unduh"    class="ttab flex-shrink-0 px-3 py-1.5 rounded-t-lg text-xs font-medium transition-all">⬇️ Unduh</button>
+    </div>
+
+    <!-- Content -->
+    <div class="overflow-y-auto flex-1 px-6 py-5 text-sm text-gray-300 leading-relaxed space-y-4">
+
+      <!-- TAB: Mulai -->
+      <div id="tpanel-mulai">
+        <h3 class="text-base font-bold text-white mb-3">🚀 Memulai — Cara Kerja Aplikasi</h3>
+        <p class="text-gray-400 mb-4">Video Generator membantu kamu membuat video konten secara otomatis dari klip atau foto yang kamu upload. Ada dua mode penggunaan:</p>
+        <div class="grid grid-cols-1 gap-3 md:grid-cols-2 mb-4">
+          <div class="rounded-lg p-4 border" style="background:#0f1a0f;border-color:#1a3a1a">
+            <p class="text-green-400 font-semibold mb-1">🤖 Full AI Mode</p>
+            <p class="text-xs text-gray-400">AI otomatis menentukan urutan klip, durasi trim, caption, warna, font, dan transisi berdasarkan deskripsi properti yang kamu tulis. Hasil lebih konsisten & profesional.</p>
+            <p class="text-xs text-yellow-600 mt-2">⚡ Tersedia untuk paket Basic ke atas</p>
+          </div>
+          <div class="rounded-lg p-4 border" style="background:#0f0f1a;border-color:#1a1a3a">
+            <p class="text-blue-400 font-semibold mb-1">🎛️ Manual Mode</p>
+            <p class="text-xs text-gray-400">Kamu mengatur sendiri caption, warna teks, transisi, font, dan color grading. Cocok untuk kebutuhan yang lebih spesifik atau paket Trial.</p>
+            <p class="text-xs text-green-600 mt-2">✓ Tersedia untuk semua paket</p>
+          </div>
+        </div>
+        <div class="rounded-lg p-4" style="background:#1a1a1a">
+          <p class="text-yellow-400 font-medium mb-2">📋 Alur Kerja</p>
+          <ol class="list-decimal list-inside space-y-1.5 text-xs text-gray-400">
+            <li>Upload klip video atau foto</li>
+            <li>Tulis deskripsi konten (untuk AI) atau atur parameter manual</li>
+            <li>Isi data CTA — nama kontak & nomor WA (opsional)</li>
+            <li>Pilih BGM, resolusi, dan durasi target</li>
+            <li>Klik <span class="text-yellow-400 font-medium">Render Video</span> dan tunggu prosesnya</li>
+            <li>Unduh hasil video MP4</li>
+          </ol>
+        </div>
+        <div class="rounded-lg p-3 mt-3 border border-yellow-900" style="background:#1a1200">
+          <p class="text-yellow-500 text-xs">💡 <strong>Tips:</strong> Untuk hasil terbaik, gunakan klip dengan pencahayaan baik, durasi 5–15 detik per klip, dan tulis deskripsi yang detail untuk mode Full AI.</p>
+        </div>
+      </div>
+
+      <!-- TAB: Upload -->
+      <div id="tpanel-upload" class="hidden">
+        <h3 class="text-base font-bold text-white mb-3">📁 Upload Media</h3>
+        <div class="space-y-4">
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">🎬 Tab Video — Upload Klip Video</p>
+            <ul class="text-xs text-gray-400 space-y-1.5 list-disc list-inside">
+              <li>Format didukung: <span class="text-white">MP4, MOV, AVI, MKV</span></li>
+              <li>Upload <strong>satu atau lebih klip</strong> — sistem akan memilih segmen terbaik secara otomatis</li>
+              <li>Rekomendasi: klip 5–30 detik per file, resolusi minimal 720p</li>
+              <li>Drag &amp; drop file langsung ke area upload, atau klik untuk browse</li>
+              <li>Klip yang sudah diupload tampil sebagai chip — klik <span class="text-red-400">✕</span> untuk hapus</li>
+            </ul>
+          </div>
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">🖼️ Tab Photo — Slideshow Foto</p>
+            <ul class="text-xs text-gray-400 space-y-1.5 list-disc list-inside">
+              <li>Format didukung: <span class="text-white">JPG, PNG, WEBP</span></li>
+              <li>Upload banyak foto — akan dijadikan slideshow otomatis</li>
+              <li>Durasi per slide menyesuaikan total durasi target</li>
+            </ul>
+          </div>
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">🏷️ Logo & 🎵 BGM (Opsional)</p>
+            <ul class="text-xs text-gray-400 space-y-1.5 list-disc list-inside">
+              <li><strong>Logo:</strong> format PNG dengan transparansi (RGBA). Ditampilkan di pojok kiri bawah pada setiap frame caption</li>
+              <li><strong>BGM:</strong> format MP3 atau WAV. Akan di-loop atau dipotong sesuai durasi video. Volume BGM bisa diatur di bagian Render</li>
+            </ul>
+          </div>
+          <div class="rounded-lg p-3 border border-yellow-900" style="background:#1a1200">
+            <p class="text-yellow-500 text-xs">💡 <strong>Tips Upload:</strong> Pastikan nama file tidak mengandung karakter khusus. Upload klip terbaik dahulu — jika menggunakan Full AI, sistem akan memilih urutan berdasarkan kualitas.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: Full AI -->
+      <div id="tpanel-ai" class="hidden">
+        <h3 class="text-base font-bold text-white mb-3">🤖 Full AI Mode</h3>
+        <p class="text-gray-400 mb-4 text-xs">Full AI Mode menggunakan kecerdasan buatan untuk menghasilkan spesifikasi render lengkap secara otomatis — mulai dari urutan klip, trim, caption, hingga color grading.</p>
+        <div class="space-y-4">
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">✏️ Deskripsi Konten</p>
+            <p class="text-xs text-gray-400 mb-2">Tulis deskripsi detail tentang isi video kamu. Semakin lengkap, semakin relevan hasil AI-nya.</p>
+            <div class="rounded-lg p-3" style="background:#1a1a1a">
+              <p class="text-xs text-gray-500 mb-1">Contoh deskripsi bagus:</p>
+              <p class="text-xs text-gray-300 italic">"Rumah 2 lantai di Serpong, 4 kamar tidur, kolam renang, taman luas. Eksterior modern minimalis dengan material batu alam. Interior mewah dengan kitchen set built-in dan ruang keluarga luas."</p>
+            </div>
+          </div>
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">🎨 Instruksi Gaya (Opsional)</p>
+            <p class="text-xs text-gray-400 mb-2">Beri arahan tambahan ke AI tentang tone dan style video yang diinginkan.</p>
+            <div class="rounded-lg p-3" style="background:#1a1a1a">
+              <p class="text-xs text-gray-500 mb-1">Contoh:</p>
+              <p class="text-xs text-gray-300 italic">"Video properti premium, hook kuat dari eksterior terbaik, interior di tengah, tutup dengan view lokasi. Tone hangat dan aspirasional untuk TikTok."</p>
+            </div>
+          </div>
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">⚡ API Key — Cara Mendapatkan</p>
+            <p class="text-xs text-gray-400 mb-3">Jika server belum dikonfigurasi dengan API key, kamu bisa memasukkan key milikmu sendiri. Key tidak disimpan di server.</p>
+
+            <!-- Gemini -->
+            <div class="rounded-lg p-4 mb-3 border" style="background:#0d1a0d;border-color:#1a3a1a">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-lg">🔵</span>
+                <p class="text-green-400 font-semibold text-xs">Google Gemini (Rekomendasi — Free Tier Tersedia)</p>
+              </div>
+              <ol class="text-xs text-gray-400 space-y-1.5 list-decimal list-inside">
+                <li>Buka <span class="text-blue-400">aistudio.google.com</span></li>
+                <li>Login dengan akun Google kamu</li>
+                <li>Klik <strong class="text-white">Get API Key</strong> → <strong class="text-white">Create API Key</strong></li>
+                <li>Pilih project Google Cloud (atau buat baru)</li>
+                <li>Copy API key yang muncul — formatnya dimulai dengan <code class="text-gray-300 bg-dark-500 px-1 rounded">AIza...</code></li>
+                <li>Paste di field <strong class="text-white">API Key</strong> dan pilih provider <strong class="text-white">Gemini</strong></li>
+              </ol>
+              <div class="mt-2 pt-2 border-t border-dark-500">
+                <p class="text-xs text-green-600">✓ Free tier: 1.500 request/hari, 1 juta token/menit — cukup untuk penggunaan normal</p>
+                <p class="text-xs text-gray-600 mt-0.5">Model yang digunakan: Gemini 2.0 Flash</p>
+              </div>
+            </div>
+
+            <!-- Anthropic -->
+            <div class="rounded-lg p-4 border" style="background:#1a0d1a;border-color:#3a1a3a">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-lg">🟠</span>
+                <p class="text-orange-400 font-semibold text-xs">Anthropic Claude (Berbayar — Pay as You Go)</p>
+              </div>
+              <ol class="text-xs text-gray-400 space-y-1.5 list-decimal list-inside">
+                <li>Buka <span class="text-blue-400">console.anthropic.com</span></li>
+                <li>Daftar akun atau login</li>
+                <li>Masuk ke menu <strong class="text-white">API Keys</strong> di sidebar</li>
+                <li>Klik <strong class="text-white">Create Key</strong> — beri nama key (contoh: "VideoGen")</li>
+                <li>Copy API key — formatnya dimulai dengan <code class="text-gray-300 bg-dark-500 px-1 rounded">sk-ant-...</code></li>
+                <li>Tambahkan saldo di menu <strong class="text-white">Billing</strong> (minimal $5)</li>
+                <li>Paste di field <strong class="text-white">API Key</strong> dan pilih provider <strong class="text-white">Anthropic</strong></li>
+              </ol>
+              <div class="mt-2 pt-2 border-t border-dark-500">
+                <p class="text-xs text-orange-600">⚠ Berbayar per token — estimasi ~$0.001–0.003 per video spec</p>
+                <p class="text-xs text-gray-600 mt-0.5">Model yang digunakan: Claude Haiku (tercepat & termurah)</p>
+              </div>
+            </div>
+
+            <div class="rounded-lg p-3 mt-3 border border-yellow-900" style="background:#1a1200">
+              <p class="text-yellow-500 text-xs">💡 <strong>Rekomendasi:</strong> Mulai dengan <strong>Google Gemini</strong> — gratis dan sudah cukup untuk kebutuhan sehari-hari. Gunakan Anthropic jika ingin hasil caption yang lebih natural dalam Bahasa Indonesia.</p>
+            </div>
+          </div>
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">📊 Hasil AI Spec</p>
+            <p class="text-xs text-gray-400">Setelah AI selesai, kamu bisa melihat preview spesifikasi yang dihasilkan: urutan klip, caption, warna, font, transisi, dan color grade. Spec ini langsung dipakai saat render.</p>
+          </div>
+          <div class="rounded-lg p-3 border border-yellow-900" style="background:#1a1200">
+            <p class="text-yellow-500 text-xs">💡 <strong>Tips Full AI:</strong> Upload minimal 3 klip berbeda untuk hasil terbaik. Gunakan deskripsi dalam Bahasa Indonesia — AI sudah dioptimasi untuk konten properti Indonesia.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: Manual -->
+      <div id="tpanel-manual" class="hidden">
+        <h3 class="text-base font-bold text-white mb-3">🎛️ Pengaturan Manual</h3>
+        <div class="space-y-4">
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">💬 Caption & Teks</p>
+            <ul class="text-xs text-gray-400 space-y-1.5 list-disc list-inside">
+              <li><strong>Deskripsi Konten:</strong> Teks ini akan otomatis dipecah menjadi beberapa caption menggunakan NLP</li>
+              <li><strong>Jumlah Caption:</strong> Berapa banyak caption yang ingin ditampilkan (1–5). Caption pertama otomatis lebih besar sebagai hook</li>
+              <li><strong>Warna Detail:</strong> Pilih warna untuk caption ke-2 dan seterusnya. Caption pertama (hook) selalu Gold</li>
+              <li><strong>Posisi Teks:</strong> Center, Left, atau Right</li>
+            </ul>
+          </div>
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">🔤 Font</p>
+            <ul class="text-xs text-gray-400 space-y-1.5 list-disc list-inside">
+              <li>Pilih dari font yang tersedia di sistem</li>
+              <li>Font bold/impact lebih cocok untuk konten properti premium</li>
+              <li>Jika tidak dipilih, sistem menggunakan font default</li>
+            </ul>
+          </div>
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">✨ Transisi</p>
+            <ul class="text-xs text-gray-400 space-y-1.5 list-disc list-inside">
+              <li><strong>Crossfade:</strong> Perpindahan halus antar klip — cocok untuk properti premium</li>
+              <li><strong>Fade to Black:</strong> Fade hitam antar klip — kesan sinematik</li>
+              <li><strong>Tanpa Transisi:</strong> Cut langsung — lebih dinamis</li>
+              <li><strong>Durasi:</strong> 0.2–1.5 detik, rekomendasi 0.4 detik</li>
+            </ul>
+          </div>
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">🎨 Color Grading</p>
+            <ul class="text-xs text-gray-400 space-y-1.5 list-disc list-inside">
+              <li>Aktifkan untuk mempercantik warna video secara otomatis</li>
+              <li><strong>Brightness:</strong> Kecerahan frame (1.0 = normal)</li>
+              <li><strong>Contrast:</strong> Ketajaman gelap-terang</li>
+              <li><strong>Saturation:</strong> Kejenuhan warna</li>
+              <li><strong>Sharpness:</strong> Ketajaman gambar</li>
+              <li>Rekomendasi properti premium: semua nilai sekitar 1.05–1.15</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: Render -->
+      <div id="tpanel-render" class="hidden">
+        <h3 class="text-base font-bold text-white mb-3">⚙️ Pengaturan Render</h3>
+        <div class="space-y-4">
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">📞 CTA (Call to Action)</p>
+            <ul class="text-xs text-gray-400 space-y-1.5 list-disc list-inside">
+              <li><strong>Label:</strong> Teks label sebelum nama (contoh: "Hubungi :")</li>
+              <li><strong>Nama:</strong> Nama agen atau perusahaan — tampil dalam warna Gold</li>
+              <li><strong>Nomor WA:</strong> Nomor WhatsApp — tampil di akhir video</li>
+              <li><strong>Durasi CTA:</strong> Berapa detik CTA tampil di akhir video (rekomendasi 3–5 detik)</li>
+              <li>CTA bersifat opsional — kosongkan jika tidak diperlukan</li>
+            </ul>
+          </div>
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">🎵 Audio</p>
+            <ul class="text-xs text-gray-400 space-y-1.5 list-disc list-inside">
+              <li><strong>Volume BGM:</strong> Volume musik latar (0 = mute, 1 = full). Rekomendasi 0.3–0.5</li>
+              <li><strong>Volume Original:</strong> Volume audio asli dari klip video. Rekomendasi 0.7–0.9</li>
+              <li>Jika tidak upload BGM, hanya audio original yang digunakan</li>
+            </ul>
+          </div>
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">📐 Resolusi & Durasi</p>
+            <ul class="text-xs text-gray-400 space-y-1.5 list-disc list-inside">
+              <li><strong>Resolusi:</strong> Output selalu format <span class="text-white">9:16 portrait</span> (vertikal) untuk TikTok & Reels</li>
+              <li>360p = preview cepat &nbsp;|&nbsp; 720p = standar &nbsp;|&nbsp; 1080p = kualitas tinggi</li>
+              <li><strong>Durasi Target:</strong> Total durasi video output yang diinginkan (dalam detik)</li>
+              <li>Sistem akan memotong atau menyesuaikan klip secara otomatis agar sesuai durasi</li>
+            </ul>
+          </div>
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">⏱️ Estimasi Waktu Render</p>
+            <div class="rounded-lg p-3" style="background:#1a1a1a">
+              <table class="w-full text-xs text-gray-400">
+                <tr><td class="pr-4 py-0.5">Video 30 detik @ 720p</td><td class="text-gray-300">~2–4 menit</td></tr>
+                <tr><td class="pr-4 py-0.5">Video 60 detik @ 720p</td><td class="text-gray-300">~4–8 menit</td></tr>
+                <tr><td class="pr-4 py-0.5">Video 30 detik @ 1080p</td><td class="text-gray-300">~5–10 menit</td></tr>
+              </table>
+            </div>
+          </div>
+          <div class="rounded-lg p-3 border border-yellow-900" style="background:#1a1200">
+            <p class="text-yellow-500 text-xs">💡 <strong>Tips Render:</strong> Untuk review cepat gunakan 360p dulu, lalu render ulang di 1080p untuk hasil final. Jangan tutup browser saat render sedang berjalan.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: Unduh -->
+      <div id="tpanel-unduh" class="hidden">
+        <h3 class="text-base font-bold text-white mb-3">⬇️ Unduh & Setelah Render</h3>
+        <div class="space-y-4">
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">📊 Progress Render</p>
+            <ul class="text-xs text-gray-400 space-y-1.5 list-disc list-inside">
+              <li>Progress bar akan muncul otomatis setelah klik <strong>Render Video</strong></li>
+              <li>Status akan diperbarui setiap beberapa detik: Loading clips → Pass 1 → Pass 2 → Selesai</li>
+              <li>Jika terjadi error, pesan error akan ditampilkan di bawah progress bar</li>
+            </ul>
+          </div>
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">⬇️ Download Video</p>
+            <ul class="text-xs text-gray-400 space-y-1.5 list-disc list-inside">
+              <li>Tombol <span class="text-yellow-400 font-medium">⬇️ Download Video</span> muncul otomatis saat render selesai</li>
+              <li>Format output: <span class="text-white">MP4 (H.264 + AAC)</span> — kompatibel dengan semua platform</li>
+              <li>Nama file: <code class="text-gray-300 bg-dark-500 px-1 rounded">video_generator_[id].mp4</code></li>
+            </ul>
+          </div>
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">🔄 Render Ulang</p>
+            <ul class="text-xs text-gray-400 space-y-1.5 list-disc list-inside">
+              <li>Klik <strong>+ New</strong> di navbar untuk memulai sesi baru dengan file baru</li>
+              <li>File upload dari sesi sebelumnya tidak tersimpan — perlu upload ulang</li>
+              <li>Kuota video dihitung per download, bukan per render</li>
+            </ul>
+          </div>
+          <div>
+            <p class="text-yellow-400 font-medium mb-2">📱 Upload ke Platform</p>
+            <ul class="text-xs text-gray-400 space-y-1.5 list-disc list-inside">
+              <li>Video sudah dalam format 9:16 vertikal — langsung siap upload ke TikTok, Instagram Reels, YouTube Shorts</li>
+              <li>Resolusi 1080p direkomendasikan untuk kualitas terbaik di platform</li>
+              <li>Tambahkan caption / hashtag platform secara manual setelah upload</li>
+            </ul>
+          </div>
+          <div class="rounded-lg p-3 border" style="background:#0f1a0f;border-color:#1a3a1a">
+            <p class="text-green-400 font-medium text-xs mb-1">✅ Checklist Sebelum Publish</p>
+            <ul class="text-xs text-gray-400 space-y-1 list-disc list-inside">
+              <li>Tonton video dari awal sampai akhir</li>
+              <li>Pastikan CTA (nama & nomor WA) sudah benar</li>
+              <li>Cek audio — balance BGM dan suara asli</li>
+              <li>Pastikan caption tidak terpotong di frame</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- end content -->
+
+    <!-- Footer nav -->
+    <div class="flex justify-between items-center px-6 py-3 border-t border-dark-500 flex-shrink-0">
+      <button id="tut-prev" onclick="tutorialNav(-1)" class="text-xs text-gray-500 hover:text-white transition-colors px-3 py-1.5 rounded-lg" style="background:#1a1a1a">← Sebelumnya</button>
+      <span id="tut-page" class="text-xs text-gray-600">1 / 6</span>
+      <button id="tut-next" onclick="tutorialNav(1)"  class="text-xs text-yellow-400 hover:text-yellow-300 transition-colors px-3 py-1.5 rounded-lg" style="background:#1a1a1a">Selanjutnya →</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     JAVASCRIPT
+═══════════════════════════════════════════════════════════════════════════ -->
+<script>
+// ── State ─────────────────────────────────────────────────────────────────
+let SID              = null;
+let aiEnabled        = false;
+let gradeEnabled     = false;
+let currentSpec      = null;
+let specPreviewOpen  = false;
+let pollTimer        = null;
+let selectedProvider = "gemini";
+let currentUser      = null;   // {id, username, user_type, package, full_ai, max_duration, videos_used, videos_limit}
+
+const uploadedClips  = [];
+const uploadedPhotos = [];
+let   logoPath  = "";
+let   bgmPath   = "";
+let   activeTab = "video";
+
+// ── Auth helpers ──────────────────────────────────────────────────────────
+function getToken() { return localStorage.getItem("vg_token") || ""; }
+function authHeaders() { return { "Authorization": "Bearer " + getToken() }; }
+
+function apiFetch(url, opts = {}) {
+  opts.headers = { ...(opts.headers || {}), ...authHeaders() };
+  return fetch(url, opts);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+window.addEventListener("DOMContentLoaded", async () => {
+  const ok = await checkAuth();
+  if (!ok) return;
+  await initSession();
+  initDragDrop();
+  updateRenderBtn();
+  switchTab("video");
+});
+
+async function checkAuth() {
+  const token = getToken();
+  if (!token) { window.location.href = "/login"; return false; }
+  try {
+    const res = await fetch("/api/me", { headers: authHeaders() });
+    if (!res.ok) { window.location.href = "/login"; return false; }
+    currentUser = await res.json();
+    applyUserProfile(currentUser);
+    return true;
+  } catch { window.location.href = "/login"; return false; }
+}
+
+function applyUserProfile(user) {
+  // Header title
+  const isMansion = user.is_mansion_team;
+  document.getElementById("app-title").innerHTML =
+    isMansion
+      ? 'Mansion <span class="text-yellow-400">Video</span> Generator'
+      : 'Konten <span class="text-yellow-400">Video</span> Generator';
+
+  // User badge in nav
+  const pkgColors = { trial:"text-gray-400", basic:"text-blue-400", lite:"text-green-400", pro:"text-yellow-400", unlimited:"text-yellow-400" };
+  const col = pkgColors[user.package] || "text-gray-400";
+  document.getElementById("user-badge").innerHTML =
+    `<span class="text-gray-600">@</span><span class="text-gray-300">${user.username}</span>` +
+    `<span class="ml-1 text-xs ${col}">[${user.package_label}]</span>`;
+
+  // Usage counter (non-mansion)
+  if (!isMansion && user.videos_limit !== -1) {
+    const rem = Math.max(0, user.videos_limit - (user.videos_used || 0));
+    document.getElementById("usage-counter").innerHTML =
+      `<span class="text-xs ${rem === 0 ? 'text-red-400' : 'text-gray-400'}">` +
+      `${user.videos_used || 0}/${user.videos_limit} video bulan ini</span>`;
+    if (rem === 0) showQuotaBanner();
+  }
+
+  // Footer — non mansion tim
+  if (!isMansion) {
+    document.getElementById("footer-text").textContent = "Video Generator · Full AI Mode powered by Claude";
+  }
+
+  // Ganti password — hanya subscriber & owner (bukan mansion_team & bukan trial)
+  if (user.user_type !== "mansion_team" && user.package !== "trial") {
+    document.getElementById("change-pw-section").classList.remove("hidden");
+  }
+
+  // Info berlangganan — hanya Trial
+  if (user.package === "trial" && !isMansion) {
+    loadSubscribeInfo();
+  }
+
+  // User management — owner only
+  if (user.is_owner) {
+    document.getElementById("admin-users-section").classList.remove("hidden");
+    loadAdminUsers();
+  }
+
+  // Package editor + settings — owner only
+  if (user.is_owner) {
+    document.getElementById("admin-packages-section").classList.remove("hidden");
+    loadAdminPackages();
+    loadAdminSettings();
+  }
+
+  // Full AI toggle — disable if not permitted
+  if (!user.full_ai) {
+    const toggle = document.getElementById("ai-toggle");
+    toggle.style.opacity = "0.35";
+    toggle.style.cursor  = "not-allowed";
+    toggle.onclick = () => showAILockedMsg(user.package_label);
+    document.getElementById("ai-locked-badge").classList.remove("hidden");
+  }
+
+  // Duration cap for trial
+  if (user.max_duration < 60) {
+    const slider = document.getElementById("duration");
+    slider.max   = user.max_duration;
+    slider.value = Math.min(slider.value, user.max_duration);
+    document.getElementById("dur-val").textContent = slider.value;
+    document.getElementById("dur-cap-note").classList.remove("hidden");
+    document.getElementById("dur-cap-note").textContent = `Max ${user.max_duration}s (paket ${user.package_label})`;
+  }
+}
+
+function showAILockedMsg(pkgLabel) {
+  const msg = `Full AI tidak tersedia di paket ${pkgLabel}.\nUpgrade ke Basic/Lite/Pro untuk menggunakan Full AI.`;
+  alert(msg);
+}
+
+function showQuotaBanner() {
+  if (document.getElementById("pkg-exhausted-banner")) return;
+  const b = document.createElement("div");
+  b.id = "pkg-exhausted-banner";
+  b.className = "card p-4 mb-4";
+  b.style.borderColor = "#7f1d1d";
+  b.innerHTML = `<div class="flex items-center gap-3">
+    <span class="text-xl">⚠️</span>
+    <div><p class="text-red-400 font-semibold text-sm">Paket Sudah Habis</p>
+    <p class="text-gray-500 text-xs mt-0.5">Kuota video bulan ini telah habis. Hubungi Tim Mansion untuk upgrade paket.</p></div>
+  </div>`;
+  document.querySelector("main").prepend(b);
+}
+
+async function initSession() {
+  const res  = await apiFetch("/api/session", { method: "POST" });
+  if (!res.ok) { window.location.href = "/login"; return; }
+  const data = await res.json();
+  SID = data.sid;
+  document.getElementById("sid-display").textContent = "Session: " + SID;
+}
+
+function doLogout() {
+  apiFetch("/api/logout", { method: "POST" });
+  localStorage.removeItem("vg_token");
+  window.location.href = "/login";
+}
+
+// ── Admin: Package Editor ──────────────────────────────────────────────────
+async function loadAdminPackages() {
+  const wrap = document.getElementById("pkg-editor-wrap");
+  wrap.innerHTML = '<p class="text-xs text-gray-600">Memuat...</p>';
+  const res  = await apiFetch("/api/admin/packages");
+  if (!res.ok) { wrap.innerHTML = '<p class="text-xs text-red-400">Gagal memuat paket.</p>'; return; }
+  const { packages } = await res.json();
+
+  const SKIP = ["unlimited"]; // Tim Mansion tidak perlu diedit
+  const editable = packages.filter(p => !SKIP.includes(p.key));
+
+  wrap.innerHTML = `
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-xs text-gray-600 border-b border-dark-500">
+            <th class="text-left py-2 pr-3">Paket</th>
+            <th class="text-left py-2 pr-3">Label</th>
+            <th class="text-center py-2 pr-3">Harga/bln (Rp)</th>
+            <th class="text-center py-2 pr-3">Video/bln</th>
+            <th class="text-center py-2 pr-3">Max Durasi (s)</th>
+            <th class="text-center py-2">Aksi</th>
+          </tr>
+        </thead>
+        <tbody id="pkg-tbody">
+          ${editable.map(p => `
+          <tr class="border-b border-dark-600" id="pkg-row-${p.key}">
+            <td class="py-2 pr-3">
+              <span class="text-xs font-mono text-gray-500">${p.key}</span>
+            </td>
+            <td class="py-2 pr-3">
+              <input class="input-base text-sm py-1" style="width:110px"
+                id="pkg-label-${p.key}" value="${p.label}" />
+            </td>
+            <td class="py-2 pr-3 text-center">
+              <input type="number" min="0" step="1000" class="input-base text-sm py-1 text-center" style="width:110px"
+                id="pkg-price-${p.key}" value="${p.price}" />
+            </td>
+            <td class="py-2 pr-3 text-center">
+              <input type="number" min="-1" max="999" class="input-base text-sm py-1 text-center" style="width:80px"
+                id="pkg-limit-${p.key}" value="${p.videos_limit}" title="-1 = unlimited" />
+            </td>
+            <td class="py-2 pr-3 text-center">
+              <input type="number" min="5" max="300" class="input-base text-sm py-1 text-center" style="width:80px"
+                id="pkg-dur-${p.key}" value="${p.max_duration}" />
+            </td>
+            <td class="py-2 text-center">
+              <button onclick="savePackage('${p.key}')"
+                class="text-xs px-3 py-1 rounded-lg font-medium transition-colors"
+                style="background:#1a1a1a;color:#f59e0b;border:1px solid #2a2a2a"
+                onmouseover="this.style.background='#f59e0b';this.style.color='#0a0a0a'"
+                onmouseout="this.style.background='#1a1a1a';this.style.color='#f59e0b'">
+                Simpan
+              </button>
+            </td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>
+    <p class="text-xs text-gray-700 mt-2">* Video/bln: -1 = tidak terbatas &nbsp;|&nbsp; Harga tampil di halaman login</p>
+  `;
+}
+
+async function savePackage(key) {
+  const label   = document.getElementById(`pkg-label-${key}`).value.trim();
+  const price   = parseInt(document.getElementById(`pkg-price-${key}`).value) || 0;
+  const limit   = parseInt(document.getElementById(`pkg-limit-${key}`).value);
+  const maxDur  = parseInt(document.getElementById(`pkg-dur-${key}`).value);
+  const msgEl   = document.getElementById("pkg-save-msg");
+
+  if (!label) { showPkgMsg("Label tidak boleh kosong.", "text-red-400"); return; }
+
+  const res = await apiFetch(`/api/admin/packages/${key}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label, price, videos_limit: limit, max_duration: maxDur }),
+  });
+  const data = await res.json();
+  if (res.ok) {
+    showPkgMsg(`✓ Paket "${label}" berhasil disimpan.`, "text-green-400");
+  } else {
+    showPkgMsg(data.detail || "Gagal menyimpan.", "text-red-400");
+  }
+}
+
+function showPkgMsg(msg, cls) {
+  const el = document.getElementById("pkg-save-msg");
+  el.textContent = msg;
+  el.className   = `text-xs mt-3 text-center ${cls}`;
+  el.classList.remove("hidden");
+  setTimeout(() => el.classList.add("hidden"), 4000);
+}
+
+// ── Admin: User Management ─────────────────────────────────────────────────
+const PKG_COLORS = { trial:"text-gray-400", basic:"text-blue-400", lite:"text-green-400", pro:"text-yellow-400", unlimited:"text-yellow-400" };
+const PKG_KEYS   = ["trial","basic","lite","pro"];
+
+async function loadAdminUsers() {
+  const wrap = document.getElementById("user-table-wrap");
+  wrap.innerHTML = '<p class="text-xs text-gray-600">Memuat...</p>';
+  const res  = await apiFetch("/api/admin/users");
+  if (!res.ok) { wrap.innerHTML = '<p class="text-xs text-red-400">Gagal memuat user.</p>'; return; }
+  const { users } = await res.json();
+
+  // Filter out system accounts from editable list
+  const SYSTEM = ["Admin","Trial"];
+  const rows = users.map(u => {
+    const isSystem = SYSTEM.includes(u.username);
+    const active   = u.is_active;
+    const pkgCol   = PKG_COLORS[u.package] || "text-gray-400";
+    const pkgOpts  = PKG_KEYS.map(k =>
+      `<option value="${k}" ${u.package===k?'selected':''}>${k}</option>`
+    ).join("");
+
+    return `<tr class="border-b border-dark-600 text-sm" id="urow-${u.id}">
+      <td class="py-2 pr-2 text-gray-600 text-xs">${u.id}</td>
+      <td class="py-2 pr-3">
+        <span class="text-white font-medium">${u.username}</span>
+        ${isSystem ? '<span class="text-xs text-gray-600 ml-1">[system]</span>' : ''}
+      </td>
+      <td class="py-2 pr-3 text-gray-400 text-xs">${u.email || '—'}</td>
+      <td class="py-2 pr-3">
+        ${isSystem
+          ? `<span class="${pkgCol} text-xs font-medium">${u.package_label}</span>`
+          : `<select onchange="updateUserPkg(${u.id}, this.value)" class="text-xs rounded px-1.5 py-0.5 ${pkgCol}"
+               style="background:#1a1a1a;border:1px solid #2a2a2a;color:inherit">${pkgOpts}</select>`
+        }
+      </td>
+      <td class="py-2 pr-3 text-center text-xs">
+        <span class="${active ? 'text-green-400' : 'text-red-400'}">${active ? '✓ Aktif' : '✗ Nonaktif'}</span>
+      </td>
+      <td class="py-2 pr-3 text-xs text-gray-600">${u.videos_used || 0}${u.videos_limit!==-1 ? '/'+u.videos_limit : ''}</td>
+      <td class="py-2 pr-3 text-xs text-gray-600">${u.created_at ? u.created_at.slice(0,10) : '—'}</td>
+      <td class="py-2">
+        ${isSystem ? '' : `
+        <div class="flex gap-1.5">
+          <button onclick="toggleUserActive(${u.id}, ${active})"
+            class="text-xs px-2 py-0.5 rounded border transition-colors"
+            style="border-color:#2a2a2a;color:${active?'#f87171':'#4ade80'}"
+            title="${active?'Nonaktifkan':'Aktifkan'}">
+            ${active ? 'Off' : 'On'}
+          </button>
+          <button onclick="promptResetPw(${u.id}, '${u.username}')"
+            class="text-xs px-2 py-0.5 rounded border transition-colors"
+            style="border-color:#2a2a2a;color:#9ca3af"
+            title="Reset Password">
+            🔑
+          </button>
+        </div>`}
+      </td>
+    </tr>`;
+  }).join("");
+
+  wrap.innerHTML = `
+    <table class="w-full text-sm min-w-max">
+      <thead>
+        <tr class="text-xs text-gray-600 border-b border-dark-500">
+          <th class="text-left py-2 pr-2">ID</th>
+          <th class="text-left py-2 pr-3">Username</th>
+          <th class="text-left py-2 pr-3">Email/WA</th>
+          <th class="text-left py-2 pr-3">Paket</th>
+          <th class="text-center py-2 pr-3">Status</th>
+          <th class="text-center py-2 pr-3">Video</th>
+          <th class="text-left py-2 pr-3">Daftar</th>
+          <th class="text-left py-2">Aksi</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p class="text-xs text-gray-700 mt-2">Total: ${users.length} user</p>`;
+}
+
+function toggleAddForm() {
+  const f = document.getElementById("add-user-form");
+  f.classList.toggle("hidden");
+  if (!f.classList.contains("hidden")) document.getElementById("new-username").focus();
+}
+
+async function submitAddUser() {
+  const username = document.getElementById("new-username").value.trim();
+  const password = document.getElementById("new-password").value.trim();
+  const email    = document.getElementById("new-email").value.trim();
+  const pkg      = document.getElementById("new-package").value;
+  const msgEl    = document.getElementById("add-user-msg");
+
+  if (!username || !password) {
+    showUserMsg("add-user-msg", "Username dan password wajib diisi.", "text-red-400"); return;
+  }
+  const res  = await apiFetch("/api/admin/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password, email, package: pkg }),
+  });
+  const data = await res.json();
+  if (res.ok) {
+    showUserMsg("add-user-msg", `✓ Subscriber "${username}" berhasil didaftarkan.`, "text-green-400");
+    document.getElementById("new-username").value = "";
+    document.getElementById("new-password").value = "";
+    document.getElementById("new-email").value    = "";
+    loadAdminUsers();
+  } else {
+    showUserMsg("add-user-msg", data.detail || "Gagal mendaftarkan.", "text-red-400");
+  }
+}
+
+async function updateUserPkg(userId, pkg) {
+  const res = await apiFetch(`/api/admin/users/${userId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ package: pkg }),
+  });
+  if (res.ok) { loadAdminUsers(); }
+  else { const d = await res.json(); alert(d.detail || "Gagal update paket."); }
+}
+
+async function toggleUserActive(userId, currentActive) {
+  const res = await apiFetch(`/api/admin/users/${userId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ is_active: currentActive ? 0 : 1 }),
+  });
+  if (res.ok) { loadAdminUsers(); }
+  else { const d = await res.json(); alert(d.detail || "Gagal update status."); }
+}
+
+async function promptResetPw(userId, username) {
+  const pw = prompt(`Reset password untuk "${username}":\nMasukkan password baru (min 4 karakter):`);
+  if (!pw || pw.length < 4) { if (pw !== null) alert("Password minimal 4 karakter."); return; }
+  const res = await apiFetch(`/api/admin/users/${userId}/reset-password`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ new_password: pw }),
+  });
+  const data = await res.json();
+  alert(res.ok ? `✓ Password "${username}" berhasil direset.` : (data.detail || "Gagal reset password."));
+}
+
+function showUserMsg(elId, msg, cls) {
+  const el = document.getElementById(elId);
+  el.textContent = msg;
+  el.className   = `text-xs mt-2 ${cls}`;
+  el.classList.remove("hidden");
+  setTimeout(() => el.classList.add("hidden"), 5000);
+}
+
+// ── Subscribe Info (Trial user) ────────────────────────────────────────────
+async function loadSubscribeInfo() {
+  const res = await fetch("/api/subscribe-info");
+  if (!res.ok) return;
+  const data = await res.json();
+
+  // Tabel paket
+  const PKG_STYLE = {
+    trial: "background:#1a1a1a;color:#9ca3af",
+    basic: "background:#1c2333;color:#60a5fa",
+    lite : "background:#1c2a1c;color:#4ade80",
+    pro  : "background:#2a1f0a;color:#fbbf24",
+  };
+  const rows = data.packages.filter(p => p.key !== "trial").map(p => {
+    const st = PKG_STYLE[p.key] || "background:#1a1a1a;color:#9ca3af";
+    const price = p.price > 0 ? `Rp ${(p.price/1000).toFixed(0)}rb` : "Gratis";
+    const limit = p.videos_limit === -1 ? "∞" : p.videos_limit;
+    return `<tr>
+      <td class="py-1.5 pr-3"><span class="text-xs font-semibold px-2 py-0.5 rounded" style="${st}">${p.label}</span></td>
+      <td class="text-center text-gray-300 text-xs pr-3">${price}</td>
+      <td class="text-center text-gray-400 text-xs pr-3">${limit}</td>
+      <td class="text-center text-yellow-400 text-xs">✓</td>
+    </tr>`;
+  }).join("");
+
+  document.getElementById("pkg-info-table").innerHTML = `
+    <table class="w-full text-sm mb-2">
+      <thead><tr class="text-xs text-gray-600">
+        <th class="text-left pb-2">Paket</th>
+        <th class="text-center pb-2">Harga/bln</th>
+        <th class="text-center pb-2">Video/bln</th>
+        <th class="text-center pb-2">Full AI</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+
+  document.getElementById("info-howto").textContent  = data.howto  || "—";
+  document.getElementById("info-terms").textContent  = data.terms  || "—";
+  const wa = data.contact || "+62 081703133252";
+  const waNum = wa.replace(/\D/g, "");
+  const contactEl = document.getElementById("info-contact");
+  contactEl.textContent = wa;
+  contactEl.href = `https://wa.me/${waNum}`;
+
+  document.getElementById("subscribe-info-section").classList.remove("hidden");
+}
+
+// ── Ganti Password ─────────────────────────────────────────────────────────
+function toggleChangePw() {
+  const body    = document.getElementById("changepw-body");
+  const chevron = document.getElementById("changepw-chevron");
+  const hidden  = body.classList.toggle("hidden");
+  chevron.textContent = hidden ? "▼" : "▲";
+  if (!hidden) document.getElementById("pw-old").focus();
+}
+
+async function submitChangePw() {
+  const oldPw  = document.getElementById("pw-old").value;
+  const newPw  = document.getElementById("pw-new").value;
+  const confPw = document.getElementById("pw-confirm").value;
+  const msgEl  = document.getElementById("changepw-msg");
+
+  if (!oldPw || !newPw) { showChangePwMsg("Semua field wajib diisi.", "text-red-400"); return; }
+  if (newPw !== confPw)  { showChangePwMsg("Password baru tidak cocok.", "text-red-400"); return; }
+  if (newPw.length < 4)  { showChangePwMsg("Password minimal 4 karakter.", "text-red-400"); return; }
+
+  const res  = await apiFetch("/api/user/password", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
+  });
+  const data = await res.json();
+  if (res.ok) {
+    showChangePwMsg("✓ Password berhasil diganti.", "text-green-400");
+    document.getElementById("pw-old").value     = "";
+    document.getElementById("pw-new").value     = "";
+    document.getElementById("pw-confirm").value = "";
+  } else {
+    showChangePwMsg(data.detail || "Gagal mengganti password.", "text-red-400");
+  }
+}
+
+// ── Tutorial ───────────────────────────────────────────────────────────────
+const TUTORIAL_TABS = ["mulai","upload","ai","manual","render","unduh"];
+let tutorialIdx = 0;
+
+function openTutorial() {
+  document.getElementById("tutorial-modal").classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+  switchTutorialTab(TUTORIAL_TABS[tutorialIdx]);
+}
+
+function closeTutorial() {
+  document.getElementById("tutorial-modal").classList.add("hidden");
+  document.body.style.overflow = "";
+}
+
+function switchTutorialTab(tab) {
+  tutorialIdx = TUTORIAL_TABS.indexOf(tab);
+  TUTORIAL_TABS.forEach(t => {
+    document.getElementById("ttab-"   + t).classList.toggle("text-yellow-400",  t === tab);
+    document.getElementById("ttab-"   + t).classList.toggle("bg-dark-500",      t === tab);
+    document.getElementById("ttab-"   + t).classList.toggle("text-gray-500",    t !== tab);
+    document.getElementById("tpanel-" + t).classList.toggle("hidden",           t !== tab);
+  });
+  document.getElementById("tut-page").textContent = `${tutorialIdx + 1} / ${TUTORIAL_TABS.length}`;
+  document.getElementById("tut-prev").style.opacity = tutorialIdx === 0 ? "0.3" : "1";
+  document.getElementById("tut-next").textContent   = tutorialIdx === TUTORIAL_TABS.length - 1 ? "✓ Selesai" : "Selanjutnya →";
+}
+
+function tutorialNav(dir) {
+  const next = tutorialIdx + dir;
+  if (next < 0) return;
+  if (next >= TUTORIAL_TABS.length) { closeTutorial(); return; }
+  switchTutorialTab(TUTORIAL_TABS[next]);
+}
+
+// Tutup modal dengan klik background
+document.getElementById("tutorial-modal").addEventListener("click", function(e) {
+  if (e.target === this) closeTutorial();
+});
+
+// Navigasi keyboard
+document.addEventListener("keydown", e => {
+  if (document.getElementById("tutorial-modal").classList.contains("hidden")) return;
+  if (e.key === "Escape")     closeTutorial();
+  if (e.key === "ArrowRight") tutorialNav(1);
+  if (e.key === "ArrowLeft")  tutorialNav(-1);
+});
+
+function showChangePwMsg(msg, cls) {
+  const el = document.getElementById("changepw-msg");
+  el.textContent = msg;
+  el.className   = `text-xs ${cls}`;
+  el.classList.remove("hidden");
+  setTimeout(() => el.classList.add("hidden"), 4000);
+}
+
+// ── Admin Settings (Ketentuan & Cara Subscribe) ────────────────────────────
+async function loadAdminSettings() {
+  const res = await apiFetch("/api/admin/settings");
+  if (!res.ok) return;
+  const data = await res.json();
+  document.getElementById("setting-howto").value   = data.subscribe_howto || "";
+  document.getElementById("setting-terms").value   = data.subscribe_terms || "";
+  document.getElementById("setting-contact").value = data.contact_wa      || "";
+}
+
+async function saveSettings() {
+  const howto   = document.getElementById("setting-howto").value;
+  const terms   = document.getElementById("setting-terms").value;
+  const contact = document.getElementById("setting-contact").value.trim();
+  const res = await apiFetch("/api/admin/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subscribe_howto: howto, subscribe_terms: terms, contact_wa: contact }),
+  });
+  const data = await res.json();
+  const msgEl = document.getElementById("settings-save-msg");
+  msgEl.textContent = res.ok ? "✓ Info berlangganan berhasil disimpan." : (data.detail || "Gagal menyimpan.");
+  msgEl.className   = `text-xs ${res.ok ? 'text-green-400' : 'text-red-400'}`;
+  msgEl.classList.remove("hidden");
+  setTimeout(() => msgEl.classList.add("hidden"), 4000);
+}
+
+async function newSession() {
+  if (pollTimer) clearInterval(pollTimer);
+  uploadedClips.length  = 0;
+  uploadedPhotos.length = 0;
+  logoPath = ""; bgmPath = ""; currentSpec = null;
+  document.getElementById("clip-list").innerHTML    = "";
+  document.getElementById("photo-list").innerHTML   = "";
+  document.getElementById("logo-name").textContent  = "Upload Logo PNG (opsional)";
+  document.getElementById("logo-preview").classList.add("hidden");
+  document.getElementById("bgm-name").textContent   = "Upload MP3 / WAV";
+  document.getElementById("progress-section").classList.add("hidden");
+  document.getElementById("download-section").classList.add("hidden");
+  document.getElementById("spec-preview").classList.add("hidden");
+  await initSession();
+  updateRenderBtn();
+}
+
+// ── Tab switcher ──────────────────────────────────────────────────────────
+function switchTab(tab) {
+  activeTab = tab;
+  const tabs = ["video", "photo"];
+  tabs.forEach(t => {
+    const btn   = document.getElementById("tab-" + t);
+    const panel = document.getElementById("panel-" + t);
+    if (t === tab) {
+      btn.classList.add("bg-dark-500", "text-white");
+      btn.classList.remove("text-gray-500");
+      panel.classList.remove("hidden");
+    } else {
+      btn.classList.remove("bg-dark-500", "text-white");
+      btn.classList.add("text-gray-500");
+      panel.classList.add("hidden");
+    }
+  });
+  updateRenderBtn();
+}
+
+// ── Drag & Drop ───────────────────────────────────────────────────────────
+function initDragDrop() {
+  ["drop-video","drop-photo"].forEach(id => {
+    const zone = document.getElementById(id);
+    zone.addEventListener("dragover", e => { e.preventDefault(); zone.classList.add("dragover"); });
+    zone.addEventListener("dragleave", ()  => zone.classList.remove("dragover"));
+    zone.addEventListener("drop", e => {
+      e.preventDefault(); zone.classList.remove("dragover");
+      if (id === "drop-video") handleVideoUpload(e.dataTransfer.files);
+      else handlePhotoUpload(e.dataTransfer.files);
+    });
+  });
+}
+
+// ── File Uploads ──────────────────────────────────────────────────────────
+async function handleVideoUpload(files) {
+  for (const file of files) {
+    const idx = uploadedClips.length;
+    const item = { name: file.name, path: "", duration: null, index: idx };
+    uploadedClips.push(item);
+    addChip("clip-list", file.name, idx, "clip");
+    uploadFile(file, "clip", idx);
+  }
+  updateRenderBtn();
+}
+
+async function handlePhotoUpload(files) {
+  const taken = uploadedPhotos.length;
+  const toAdd = Math.min(files.length, 6 - taken);
+  for (let i = 0; i < toAdd; i++) {
+    const file = files[i];
+    const idx  = uploadedPhotos.length;
+    uploadedPhotos.push({ name: file.name, path: "", index: idx });
+    addChip("photo-list", file.name, idx, "photo");
+    uploadFile(file, "photo", idx);
+  }
+  if (files.length > toAdd) addLog(`Maksimal 6 foto. ${files.length - toAdd} file diabaikan.`, "info");
+  updateRenderBtn();
+}
+
+async function handleLogo(files) {
+  if (!files[0]) return;
+  const file = files[0];
+  const data = await uploadFileRaw(file, "logo");
+  if (data) {
+    logoPath = data.path;
+    document.getElementById("logo-name").textContent = "✅ " + file.name;
+    const reader = new FileReader();
+    reader.onload = e => {
+      document.getElementById("logo-img").src = e.target.result;
+      document.getElementById("logo-preview").classList.remove("hidden");
+    };
+    reader.readAsDataURL(file);
+  }
+}
+
+async function handleBGM(files) {
+  if (!files[0]) return;
+  const file = files[0];
+  const data = await uploadFileRaw(file, "bgm");
+  if (data) {
+    bgmPath = data.path;
+    document.getElementById("bgm-name").textContent = "🎵 " + file.name;
+  }
+}
+
+async function uploadFile(file, type, idx) {
+  const data = await uploadFileRaw(file, type);
+  if (data) {
+    if (type === "clip")  uploadedClips[idx].path  = data.path;
+    if (type === "photo") uploadedPhotos[idx].path = data.path;
+    // Update chip
+    const chip = document.getElementById(`chip-${type}-${idx}`);
+    if (chip) {
+      chip.querySelector(".chip-status").textContent = "✅";
+      chip.querySelector(".chip-status").className  = "chip-status text-green-400";
+    }
+  }
+}
+
+async function uploadFileRaw(file, type) {
+  if (!SID) return null;
+  const form = new FormData();
+  form.append("file", file);
+  form.append("file_type", type);
+  try {
+    const res = await fetch(`/api/upload/${SID}`, { method: "POST", body: form });
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
+}
+
+function addChip(containerId, name, idx, type) {
+  const c = document.getElementById(containerId);
+  const div = document.createElement("div");
+  div.id = `chip-${type}-${idx}`;
+  div.className = "clip-chip flex items-center gap-2 px-3 py-2 rounded-lg text-sm";
+  div.style.background = "#1a1a1a";
+  div.innerHTML = `
+    <span class="chip-status text-yellow-500 text-xs">⏳</span>
+    <span class="text-gray-300 truncate flex-1">${name}</span>
+    <button onclick="removeChip('${type}',${idx})" class="text-gray-600 hover:text-red-400 text-xs ml-1">✕</button>`;
+  c.appendChild(div);
+}
+
+function removeChip(type, idx) {
+  const elem = document.getElementById(`chip-${type}-${idx}`);
+  if (elem) elem.remove();
+  if (type === "clip")  uploadedClips.splice(idx, 1);
+  if (type === "photo") uploadedPhotos.splice(idx, 1);
+  updateRenderBtn();
+}
+
+// ── Toggles ───────────────────────────────────────────────────────────────
+function toggleAI() {
+  aiEnabled = !aiEnabled;
+  const t = document.getElementById("ai-toggle");
+  t.classList.toggle("on", aiEnabled);
+  document.getElementById("manual-caption-section").style.opacity = aiEnabled ? "0.45" : "1";
+  document.getElementById("btn-ai-spec").disabled = !aiEnabled;
+  if (!aiEnabled) {
+    currentSpec = null;
+    document.getElementById("spec-preview").classList.add("hidden");
+  }
+  updateRenderBtn();
+}
+
+function toggleGrade() {
+  gradeEnabled = !gradeEnabled;
+  document.getElementById("grade-toggle").classList.toggle("on", gradeEnabled);
+  document.getElementById("grade-sliders").classList.toggle("hidden", !gradeEnabled);
+}
+
+function toggleSpecPreview() {
+  specPreviewOpen = !specPreviewOpen;
+  document.getElementById("spec-body").classList.toggle("hidden", !specPreviewOpen);
+  document.getElementById("spec-arrow").textContent = specPreviewOpen ? "▲" : "▼";
+}
+
+// ── AI Spec ────────────────────────────────────────────────────────────────
+async function getAISpec() {
+  const clips = getClipMeta();
+  if (clips.length === 0) { alert("Upload video clips atau foto terlebih dahulu."); return; }
+
+  const btn = document.getElementById("btn-ai-spec");
+  btn.disabled = true;
+  btn.textContent = "⏳ Generating...";
+  addLog("Calling Gemini AI...", "info");
+  setQuotaStatus("loading");
+
+  try {
+    const userKey = (document.getElementById("user-api-key")?.value || "").trim();
+    const payload = {
+      sid               : SID,
+      description       : document.getElementById("description").value,
+      style_prompt      : document.getElementById("style-prompt").value,
+      n_captions        : parseInt(document.getElementById("n-captions").value),
+      clips             : clips,
+      user_api_key      : userKey,
+      user_key_provider : userKey ? selectedProvider : "",
+    };
+    const res  = await fetch("/api/ai-spec", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "AI spec failed");
+    }
+    const data = await res.json();
+    currentSpec = data.spec;
+    renderSpecPreview(currentSpec);
+    document.getElementById("spec-preview").classList.remove("hidden");
+    setQuotaStatus("ok");
+    addLog("✅ AI Spec generated", "success");
+  } catch(e) {
+    // Deteksi quota habis dari pesan error Gemini
+    const msg = e.message || "";
+    if (isQuotaError(msg)) {
+      setQuotaStatus("exhausted");
+      showQuotaWarning();
+    } else if (msg.includes("503") || msg.includes("GEMINI_API_KEY")) {
+      setQuotaStatus("error", msg);
+    } else {
+      setQuotaStatus("error", msg);
+    }
+    addLog("❌ " + msg, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "✨ Generate AI Spec";
+  }
+}
+
+function isQuotaError(msg) {
+  // Gemini free tier error patterns
+  return msg.includes("429") ||
+         msg.includes("quota") ||
+         msg.includes("RESOURCE_EXHAUSTED") ||
+         msg.toLowerCase().includes("rate limit") ||
+         msg.toLowerCase().includes("limit exceeded");
+}
+
+function setQuotaStatus(state, detail) {
+  const dot = document.getElementById("quota-dot");
+  const msg = document.getElementById("quota-msg");
+  const map = {
+    ok        : ["bg-green-500",  "✅ Gemini Flash aktif — free tier tersedia"],
+    loading   : ["bg-yellow-500", "⏳ Menghubungi Gemini..."],
+    exhausted : ["bg-red-500",    "⚠️ Free tier harian habis — coba lagi besok (reset ~UTC 00:00)"],
+    error     : ["bg-red-500",    "❌ " + (detail || "Gagal menghubungi Gemini")],
+  };
+  const [cls, text] = map[state] || ["bg-gray-600", "—"];
+  dot.className = "w-2 h-2 rounded-full " + cls;
+  msg.textContent = text;
+  msg.className = state === "exhausted" || state === "error" ? "text-red-400" :
+                  state === "ok" ? "text-green-400" : "text-yellow-400";
+}
+
+function showQuotaWarning() {
+  // Tampilkan user key panel
+  document.getElementById("user-key-panel").classList.remove("hidden");
+  selectProvider("gemini");  // default ke Gemini
+
+  // Tampilkan banner warning
+  if (!document.getElementById("quota-banner")) {
+    const banner = document.createElement("div");
+    banner.id = "quota-banner";
+    banner.className = "card p-4";
+    banner.style.borderColor = "#7f1d1d";
+    banner.innerHTML = `
+      <div class="flex items-start gap-3">
+        <span class="text-2xl">⚠️</span>
+        <div class="flex-1">
+          <p class="text-red-400 font-semibold text-sm">Gemini Free Tier Harian Habis</p>
+          <p class="text-gray-400 text-xs mt-1">
+            Quota reset pukul <strong class="text-white">07:00 WIB</strong> (UTC 00:00).
+            Sementara: gunakan key sendiri di bawah, atau switch ke <strong class="text-yellow-400">Mode Manual</strong>.
+          </p>
+        </div>
+        <button onclick="this.parentElement.parentElement.remove()" class="text-gray-600 hover:text-white text-lg">✕</button>
+      </div>`;
+    const renderCard = document.getElementById("btn-render").closest(".card");
+    renderCard.parentElement.insertBefore(banner, renderCard);
+  }
+}
+
+function hideUserKeyPanel() {
+  document.getElementById("user-key-panel").classList.add("hidden");
+  document.getElementById("user-api-key").value = "";
+}
+
+const PROVIDER_INFO = {
+  gemini: {
+    label: "Google Gemini Flash",
+    steps: [
+      '1. Buka <a href="https://aistudio.google.com/apikey" target="_blank" class="text-blue-400 underline">aistudio.google.com/apikey</a>',
+      "2. Login dengan akun Google",
+      '3. Klik <strong class="text-white">Create API Key</strong>',
+      "4. Copy key (format: AIza...)",
+      "5. Free tier: 1.500 req/hari, 1M token/menit",
+    ],
+    placeholder: "AIza...",
+  },
+  anthropic: {
+    label: "Anthropic Claude",
+    steps: [
+      '1. Buka <a href="https://console.anthropic.com/settings/keys" target="_blank" class="text-blue-400 underline">console.anthropic.com</a>',
+      "2. Daftar / login",
+      '3. Klik <strong class="text-white">Create Key</strong>',
+      "4. Copy key (format: sk-ant-...)",
+      "5. Biaya: ~Rp 15/request (Claude Haiku)",
+    ],
+    placeholder: "sk-ant-...",
+  },
+};
+
+function selectProvider(provider) {
+  selectedProvider = provider;
+  ["gemini", "anthropic"].forEach(p => {
+    const btn = document.getElementById("btn-prov-" + p);
+    if (p === provider) {
+      btn.style.borderColor = "#f59e0b";
+      btn.style.color = "#f59e0b";
+      btn.style.background = "rgba(245,158,11,.08)";
+    } else {
+      btn.style.borderColor = "";
+      btn.style.color = "";
+      btn.style.background = "";
+    }
+  });
+
+  const info  = PROVIDER_INFO[provider];
+  const panel = document.getElementById("get-key-info");
+  panel.classList.remove("hidden");
+  panel.innerHTML = `
+    <p class="text-yellow-400 font-medium mb-1.5">Cara dapat key ${info.label}:</p>
+    ${info.steps.map(s => `<p class="text-gray-400">${s}</p>`).join("")}`;
+  document.getElementById("user-api-key").placeholder = info.placeholder;
+}
+
+function getClipMeta() {
+  if (activeTab === "video") {
+    return uploadedClips
+      .filter(c => c.path)
+      .map((c, i) => ({ index: i, name: c.name, duration: c.duration || 10 }));
+  } else {
+    return uploadedPhotos
+      .filter(p => p.path)
+      .map((p, i) => ({ index: i, name: p.name, duration: 6 }));
+  }
+}
+
+function clearSpec() {
+  currentSpec = null;
+  document.getElementById("spec-preview").classList.add("hidden");
+  addLog("Spec cleared.", "info");
+}
+
+function renderSpecPreview(spec) {
+  // Captions
+  const capDiv = document.getElementById("spec-captions");
+  capDiv.innerHTML = "";
+  (spec.captions || []).forEach((c, i) => {
+    const colorMap = { Gold:"#ffd700", White:"#fff", Silver:"#c0c0c0", Champagne:"#ffdf80", "Rose Gold":"#d2b48c" };
+    const col = colorMap[c.color] || "#fff";
+    capDiv.innerHTML += `
+      <div class="flex items-center gap-2 text-sm">
+        <span class="text-xs text-gray-600 w-4">${i+1}</span>
+        <span class="font-medium" style="color:${col};">${c.text}</span>
+        <span class="spec-badge gold ml-auto">${c.color}</span>
+        <span class="spec-badge">${c.align}</span>
+      </div>`;
+  });
+
+  // Transition
+  const tr = spec.transition || {};
+  document.getElementById("spec-transition").innerHTML =
+    `<span class="text-gold-400">${tr.type || "Crossfade"}</span>
+     <span class="text-gray-500 text-xs ml-1">${(tr.duration||0.4).toFixed(1)}s</span>`;
+
+  // Color grade
+  const cg = spec.color_grade || {};
+  document.getElementById("spec-grade").innerHTML = [
+    ["Br", cg.brightness], ["Co", cg.contrast],
+    ["Sa", cg.saturation], ["Sh", cg.sharpness],
+  ].map(([k,v]) => `<span class="mr-2 text-xs"><span class="text-gray-500">${k}</span> <span class="text-gold-400">${v?.toFixed(2)||"—"}</span></span>`).join("");
+
+  // Font + reasoning
+  document.getElementById("spec-font").textContent   = spec.font || "—";
+  document.getElementById("spec-reasoning").textContent = spec.reasoning || "";
+}
+
+// ── Render ────────────────────────────────────────────────────────────────
+function updateRenderBtn() {
+  const hasMedia = activeTab === "video"
+    ? uploadedClips.some(c => c.path)
+    : uploadedPhotos.some(p => p.path);
+  document.getElementById("btn-render").disabled = !hasMedia || !SID;
+}
+
+async function startRender() {
+  if (!SID) { alert("Session belum ready."); return; }
+
+  document.getElementById("btn-render").disabled = true;
+  document.getElementById("progress-section").classList.remove("hidden");
+  document.getElementById("download-section").classList.add("hidden");
+  document.getElementById("log-box").innerHTML = "";
+
+  const resolution = document.querySelector('input[name="resolution"]:checked')?.value || "720p  (720×1280) Best";
+  const detailColors = [
+    document.getElementById("detail-color-1").value,
+    document.getElementById("detail-color-2").value,
+  ];
+
+  const payload = {
+    sid            : SID,
+    clip_paths     : uploadedClips.filter(c=>c.path).map(c=>c.path),
+    photo_paths    : uploadedPhotos.filter(p=>p.path).map(p=>p.path),
+    logo_path      : logoPath,
+    bgm_path       : bgmPath,
+    bgm_volume     : parseFloat(document.getElementById("bgm-volume").value),
+    orig_vol       : parseFloat(document.getElementById("orig-vol").value),
+    duration_target: parseInt(document.getElementById("duration").value),
+    resolution     : resolution,
+    cta_label      : document.getElementById("cta-label").value,
+    cta_nama       : document.getElementById("cta-nama").value,
+    cta_wa         : document.getElementById("cta-wa").value,
+    cta_dur        : parseInt(document.getElementById("cta-dur").value),
+    ai_spec        : (aiEnabled && currentSpec) ? currentSpec : null,
+    description    : document.getElementById("description").value,
+    n_captions     : parseInt(document.getElementById("n-captions").value),
+    caption_align  : document.getElementById("caption-align").value,
+    detail_colors  : detailColors,
+    font_path      : "",
+    transition     : document.getElementById("transition").value,
+    fade_dur       : parseFloat(document.getElementById("fade-dur").value),
+    do_grade       : gradeEnabled,
+    brightness     : parseFloat(document.getElementById("brightness").value),
+    contrast       : parseFloat(document.getElementById("contrast").value),
+    saturation     : parseFloat(document.getElementById("saturation").value),
+    sharpness      : parseFloat(document.getElementById("sharpness").value),
+  };
+
+  try {
+    const res = await fetch(`/api/render/${SID}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Render failed to start");
+    }
+    addLog("🎬 Render dimulai...", "info");
+    pollTimer = setInterval(pollStatus, 2000);
+  } catch(e) {
+    addLog("❌ " + e.message, "error");
+    document.getElementById("btn-render").disabled = false;
+  }
+}
+
+async function pollStatus() {
+  try {
+    const res  = await fetch(`/api/status/${SID}`);
+    const data = await res.json();
+    updateProgress(data.progress, data.message);
+    addLog(data.message, data.status === "error" ? "error" : "info");
+    if (data.status === "done") {
+      clearInterval(pollTimer);
+      showDownload();
+    } else if (data.status === "error") {
+      clearInterval(pollTimer);
+      addLog("❌ Error: " + data.message, "error");
+      document.getElementById("btn-render").disabled = false;
+    }
+  } catch(e) {
+    addLog("Polling error: " + e.message, "error");
+  }
+}
+
+function updateProgress(pct, msg) {
+  document.getElementById("progress-bar").style.width = pct + "%";
+  document.getElementById("progress-pct").textContent = pct + "%";
+  document.getElementById("progress-msg").textContent  = msg;
+}
+
+function showDownload() {
+  document.getElementById("download-section").classList.remove("hidden");
+  document.getElementById("download-link").href = `/api/download/${SID}`;
+  updateProgress(100, "✅ Selesai!");
+}
+
+function resetRender() {
+  document.getElementById("download-section").classList.add("hidden");
+  document.getElementById("progress-section").classList.add("hidden");
+  document.getElementById("btn-render").disabled = false;
+}
+
+// ── Log helper ────────────────────────────────────────────────────────────
+let lastLog = "";
+function addLog(msg, type="info") {
+  if (msg === lastLog) return;
+  lastLog = msg;
+  const box = document.getElementById("log-box");
+  const line = document.createElement("div");
+  line.className = `log-line ${type}`;
+  line.textContent = "› " + msg;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+</script>
+</body>
+</html>
