@@ -1,0 +1,16 @@
+__pycache__
+*.pyc
+*.pyo
+.git
+.gitignore
+output/
+uploads/
+vidgen_users.db
+*.mp4
+*.mov
+app.py
+VidGen.py
+mansionvidgen.py
+testnltk.py
+package.txt
+DOCS.md

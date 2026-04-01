@@ -30,6 +30,9 @@ anthropic>=0.40.0
 # ── Full AI Mode (FastAPI mode — server-side key, free tier) ────────
 google-generativeai>=0.8.0
 
+# ── Database ───────────────────────────────────────────────────────
+google-cloud-firestore>=2.16.0
+
 # ── Utilities ──────────────────────────────────────────────────────
 decorator>=4.4.2
 tqdm>=4.66.0

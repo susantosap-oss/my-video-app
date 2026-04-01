@@ -111,11 +111,12 @@ def scan_available_fonts() -> list[dict]:
         p = os.path.normpath(path)
         if p not in seen and os.path.exists(p):
             seen.add(p); found.append({"label": label, "path": p})
-    for ext in ("*.ttf", "*.TTF", "*.otf", "*.OTF"):
-        for fp in glob.glob(os.path.join("assets", ext)):
-            fname = os.path.basename(fp)
-            label = "📁 " + os.path.splitext(fname)[0].replace("_"," ").replace("-"," ").title()
-            add(fp, label)
+    for folder in ("fonts", "assets"):
+        for ext in ("*.ttf", "*.TTF", "*.otf", "*.OTF"):
+            for fp in glob.glob(os.path.join(folder, ext)):
+                fname = os.path.basename(fp)
+                label = "📁 " + os.path.splitext(fname)[0].replace("_"," ").replace("-"," ").title()
+                add(fp, label)
     for fp in _SYSTEM_FONT_PATHS:
         fname = os.path.basename(fp)
         add(fp, _WIN_FONT_LABELS.get(fname, os.path.splitext(fname)[0]))

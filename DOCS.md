@@ -1,8 +1,8 @@
 # Video Generator — Dokumentasi Sistem
 
-> **Status:** ✅ Local Test OK — 25 Mar 2026
-> **Next:** Build & Deploy ke Google Cloud Run
-> **Stack:** FastAPI + SQLite + Tailwind CSS + MoviePy + Gemini/Claude AI
+> **Status:** ✅ Live di Google Cloud Run — 1 Apr 2026
+> **URL:** https://vidgen-final-450838017325.us-central1.run.app
+> **Stack:** FastAPI + Firestore + Tailwind CSS + MoviePy + Gemini/Claude AI
 
 ---
 
@@ -32,6 +32,7 @@
 ┌─────────────────────────────────────────┐
 │           Browser (Client)              │
 │  login.html  /  index.html (Tailwind)   │
+│  PWA — installable (manifest + SW)      │
 └─────────────────┬───────────────────────┘
                   │ HTTP/REST (Bearer Token)
 ┌─────────────────▼───────────────────────┐
@@ -40,15 +41,16 @@
 │  Admin · AI-Spec · Download             │
 └──────┬──────────┬──────────┬────────────┘
        │          │          │
-  ┌────▼───┐ ┌───▼────┐ ┌──▼──────────────┐
-  │SQLite  │ │Render  │ │ AI Providers     │
-  │database│ │Engine  │ │ Gemini 2.0 Flash │
-  │.db     │ │MoviePy │ │ Claude Haiku     │
-  └────────┘ └────────┘ └──────────────────┘
+  ┌────▼────────┐ ┌───▼────┐ ┌──▼──────────────┐
+  │ Firestore   │ │Render  │ │ AI Providers     │
+  │ (GCP)       │ │Engine  │ │ Gemini 2.0 Flash │
+  │ persistent  │ │MoviePy │ │ Claude Haiku     │
+  └─────────────┘ └────────┘ └──────────────────┘
 ```
 
-**Deploy Target:** Google Cloud Run
-**Start command:** `uvicorn api:app --host 0.0.0.0 --port $PORT`
+**Deploy:** Google Cloud Run — `us-central1`
+**Project:** `video-generator-1-488713`
+**Start command:** `uvicorn api:app --host 0.0.0.0 --port 8080`
 
 ---
 
@@ -59,57 +61,65 @@
 | `api.py` | FastAPI backend — semua endpoint REST |
 | `render_engine.py` | Core render: clip processing, caption, color grade, pass1+2 |
 | `ai_spec.py` | Full AI spec generator — Gemini & Anthropic client |
-| `database.py` | SQLite ORM — users, sessions, packages, site_settings |
+| `database.py` | Firestore ORM — users, sessions, packages, site_settings |
 | `auth.py` | Login / logout / session token management |
 | `static/index.html` | Main app UI (Tailwind dark+gold theme) |
 | `static/login.html` | Halaman login — bersih, hanya form |
+| `static/manifest.json` | PWA manifest — nama, icon, theme color |
+| `static/service-worker.js` | PWA service worker — cache shell, network-first |
+| `static/icon-192.png` | PWA icon 192×192 |
+| `static/icon-512.png` | PWA icon 512×512 |
+| `Dockerfile` | Container build untuk Cloud Run |
+| `.dockerignore` | Exclude file tidak perlu dari image |
 | `VidGen.py` | Streamlit app lama (dipertahankan, tetap bisa jalan terpisah) |
 | `uploads/` | Temporary upload files per session |
 | `output/` | Hasil render sementara (dihapus setelah download) |
-| `vidgen_users.db` | SQLite database file |
-| `fonts/` | Custom font files (.ttf) untuk caption |
+| `fonts/` | Custom font files (.ttf) untuk caption (12 font) |
 | `nltk_data/` | NLTK offline data untuk NLP caption |
 
 ---
 
-## 3. Database Schema
+## 3. Database Schema (Firestore)
 
-### Tabel `users`
-| Kolom | Tipe | Keterangan |
-|-------|------|------------|
-| id | INTEGER PK | Auto increment |
-| username | TEXT UNIQUE | Nama login |
-| password_hash | TEXT | SHA-256 hash password |
-| email | TEXT | Email atau nomor WA |
-| user_type | TEXT | `owner` / `mansion_team` / `subscriber` / `trial` |
-| package | TEXT | `unlimited` / `trial` / `basic` / `lite` / `pro` |
-| videos_used | INTEGER | Jumlah video dirender bulan ini |
-| billing_month | TEXT | Format `YYYY-MM` — reset hitungan tiap bulan baru |
-| is_active | INTEGER | `1` = aktif, `0` = nonaktif |
-| created_at | TEXT | Timestamp pembuatan akun |
+Database menggunakan **Google Cloud Firestore** (NoSQL, persistent, free tier).
+Project: `video-generator-1-488713`, region: `asia-southeast1`.
 
-### Tabel `sessions`
-| Kolom | Tipe | Keterangan |
+### Collection `users`
+| Field | Tipe | Keterangan |
 |-------|------|------------|
-| token | TEXT PK | Token autentikasi (urlsafe 32 byte) |
-| user_id | INTEGER FK | Referensi ke `users.id` |
-| expires_at | TEXT | Expired 7 hari setelah login |
+| id | string | = username (document ID) |
+| username | string | Nama login (unik) |
+| password_hash | string | SHA-256 hash password |
+| email | string | Email atau nomor WA |
+| user_type | string | `owner` / `mansion_team` / `subscriber` / `trial` |
+| package | string | `unlimited` / `trial` / `basic` / `lite` / `pro` |
+| videos_used | integer | Jumlah video dirender bulan ini |
+| billing_month | string | Format `YYYY-MM` — reset hitungan tiap bulan baru |
+| is_active | boolean | `true` = aktif, `false` = nonaktif |
+| created_at | string | ISO timestamp pembuatan akun |
 
-### Tabel `packages`
-| Kolom | Tipe | Keterangan |
+### Collection `sessions`
+| Field | Tipe | Keterangan |
 |-------|------|------------|
-| key | TEXT PK | `unlimited` / `trial` / `basic` / `lite` / `pro` |
-| label | TEXT | Nama tampil (editable oleh owner) |
-| videos_limit | INTEGER | `-1` = unlimited, angka = batas per bulan |
-| max_duration | INTEGER | Maks durasi video dalam detik |
-| full_ai | INTEGER | `1` = Full AI tersedia, `0` = tidak |
-| price | INTEGER | Harga dalam Rupiah (editable oleh owner) |
+| *(doc ID)* | string | Token autentikasi (urlsafe 32 byte) |
+| user_id | string | = username referensi ke users |
+| expires_at | string | `YYYY-MM-DD HH:MM:SS`, expired 7 hari |
 
-### Tabel `site_settings`
-| Kolom | Tipe | Keterangan |
+### Collection `packages`
+| Field | Tipe | Keterangan |
 |-------|------|------------|
-| key | TEXT PK | `subscribe_terms` / `subscribe_howto` / `contact_wa` |
-| value | TEXT | Konten teks (editable oleh owner) |
+| *(doc ID)* | string | `unlimited` / `trial` / `basic` / `lite` / `pro` |
+| label | string | Nama tampil (editable oleh owner) |
+| videos_limit | integer | `-1` = unlimited, angka = batas per bulan |
+| max_duration | integer | Maks durasi video dalam detik |
+| full_ai | boolean | Full AI tersedia atau tidak |
+| price | integer | Harga dalam Rupiah (editable oleh owner) |
+
+### Collection `site_settings`
+| Field | Tipe | Keterangan |
+|-------|------|------------|
+| *(doc ID)* | string | `subscribe_terms` / `subscribe_howto` / `contact_wa` |
+| value | string | Konten teks (editable oleh owner) |
 
 ---
 
@@ -175,7 +185,7 @@ trial
 - Jika kuota habis, render ditolak dengan pesan upgrade paket
 
 ### Harga Editable
-Harga, label, `videos_limit`, dan `max_duration` dapat diubah oleh **owner** melalui panel "⚙️ Pengaturan Paket" tanpa perlu deploy ulang — tersimpan di tabel `packages` SQLite.
+Harga, label, `videos_limit`, dan `max_duration` dapat diubah oleh **owner** melalui panel "⚙️ Pengaturan Paket" tanpa perlu deploy ulang — tersimpan di collection `packages` Firestore.
 
 ---
 
@@ -491,27 +501,42 @@ GEMINI_API_KEY=<your_google_ai_studio_key>   # Wajib untuk Full AI server-side
 uvicorn api:app --host 0.0.0.0 --port $PORT
 ```
 
-### Dockerfile (perlu dibuat)
+### Dockerfile
 ```dockerfile
 FROM python:3.11-slim
+RUN apt-get update && apt-get install -y ffmpeg
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install -r requirements.txt
-COPY . .
-CMD uvicorn api:app --host 0.0.0.0 --port $PORT
+RUN pip install --no-cache-dir -r requirements.txt
+RUN python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('punkt_tab', quiet=True)"
+COPY api.py auth.py database.py render_engine.py ai_spec.py ./
+COPY static/ ./static/
+COPY assets/ ./assets/
+COPY fonts/ ./fonts/
+RUN mkdir -p /app/output /app/uploads
+ENV PORT=8080
+CMD ["python", "-m", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
 
-### Hal yang Perlu Diperhatikan Saat Deploy
-- [ ] SQLite di Cloud Run = **ephemeral** (data hilang saat redeploy). Pertimbangkan mount persistent disk atau migrasi ke Cloud SQL
-- [ ] Folder `uploads/` dan `output/` juga ephemeral — pertimbangkan Google Cloud Storage
+### Deploy Command
+```bash
+gcloud run deploy vidgen-final --source . \
+  --project=video-generator-1-488713 \
+  --region=us-central1 \
+  --port=8080 --memory=2Gi --cpu=1 \
+  --allow-unauthenticated --quiet
+```
+
+### Hal yang Perlu Diperhatikan
 - [ ] Ganti password default `Admin` dan `Mansion tim` setelah deploy pertama
-- [ ] Set `GEMINI_API_KEY` sebagai environment variable di Cloud Run (bukan di code)
-- [ ] Pertimbangkan `MAX_INSTANCES=1` di Cloud Run agar sesi render tidak conflict antar instance
+- [ ] Set `GEMINI_API_KEY` sebagai environment variable di Cloud Run
+- [ ] Folder `uploads/` dan `output/` masih ephemeral — file hilang saat restart (OK untuk sesi render)
+- [ ] Render session disimpan **in-memory** — tidak survive restart (user perlu upload ulang)
+- [ ] Pertimbangkan `max-instances=1` agar sesi render tidak conflict antar instance
 
 ### Keterbatasan Saat Ini
-- Render session disimpan **in-memory** (`SESSIONS` dict) — tidak survive restart
-- SQLite tidak cocok untuk multi-instance — aman untuk single instance Cloud Run
-- File upload bersifat sementara dalam sesi — tidak ada persistent storage
+- File upload bersifat sementara dalam sesi — tidak ada persistent storage untuk file video
+- Render session in-memory tidak survive container restart
 
 ---
 
@@ -519,9 +544,13 @@ CMD uvicorn api:app --host 0.0.0.0 --port $PORT
 
 | Tanggal | Keterangan |
 |---------|------------|
-| 25 Mar 2026 | ✅ Local test OK. Full AI + Manual render, Auth, Admin panel, Tutorial, Watermark Trial, Package editor, Subscribe info, Ganti password semua berfungsi. Belum deploy ke Cloud Run. |
-| 25 Mar 2026 | ➕ Dashboard owner ringkas (summary cards + breakdown paket + top users). Data dari schema existing, tanpa tabel baru. |
+| 25 Mar 2026 | ✅ Local test OK. Full AI + Manual render, Auth, Admin panel, Tutorial, Watermark Trial, Package editor, Subscribe info, Ganti password semua berfungsi. |
+| 25 Mar 2026 | ➕ Dashboard owner ringkas (summary cards + breakdown paket + top users). |
+| 1 Apr 2026 | 🚀 Deploy pertama ke Google Cloud Run (`vidgen-final`, `us-central1`). Dockerfile dibuat, dependencies diinstall. |
+| 1 Apr 2026 | ➕ Font selector UI di section Caption Style — load dari `/api/fonts`, scan folder `fonts/` (12 font) + system fonts. |
+| 1 Apr 2026 | ➕ PWA support — `manifest.json`, `service-worker.js`, icon 192+512px. App name: "Konten Video Generator". Installable di Chrome/Android/iOS. |
+| 1 Apr 2026 | 🔄 Migrasi database SQLite → **Firestore** (GCP, asia-southeast1, free tier). Data user/session/settings kini persistent — tidak hilang saat container restart. |
 
 ---
 
-*Dokumentasi ini dibuat otomatis berdasarkan state kode pada 25 Mar 2026.*
+*Dokumentasi terakhir diupdate: 1 Apr 2026*

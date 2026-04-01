@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Mansion Video Generator</title>
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#f59e0b" />
+  <link rel="apple-touch-icon" href="/static/icon-192.png" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -417,6 +420,13 @@
       <span class="text-gold-400">🎨</span>
       <h2 class="font-semibold text-white">Caption Style</h2>
       <span class="text-xs text-gray-600">(dipakai saat Full AI Mode OFF)</span>
+    </div>
+    <!-- Font Selector -->
+    <div class="mb-3">
+      <label class="text-xs text-gray-500 mb-1 block">Font Caption</label>
+      <select id="font-select" class="input-base">
+        <option value="">Default (Arial Black)</option>
+      </select>
     </div>
     <div class="grid sm:grid-cols-2 gap-3">
       <div>
@@ -1072,10 +1082,26 @@ window.addEventListener("DOMContentLoaded", async () => {
   const ok = await checkAuth();
   if (!ok) return;
   await initSession();
+  await loadFonts();
   initDragDrop();
   updateRenderBtn();
   switchTab("video");
 });
+
+async function loadFonts() {
+  try {
+    const res = await fetch("/api/fonts", { headers: authHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    const sel = document.getElementById("font-select");
+    data.fonts.forEach(f => {
+      const opt = document.createElement("option");
+      opt.value = f.path;
+      opt.textContent = f.label;
+      sel.appendChild(opt);
+    });
+  } catch(e) { /* font list optional */ }
+}
 
 async function checkAuth() {
   const token = getToken();
@@ -2095,7 +2121,7 @@ async function startRender() {
     n_captions     : parseInt(document.getElementById("n-captions").value),
     caption_align  : document.getElementById("caption-align").value,
     detail_colors  : detailColors,
-    font_path      : "",
+    font_path      : document.getElementById("font-select").value,
     transition     : document.getElementById("transition").value,
     fade_dur       : parseFloat(document.getElementById("fade-dur").value),
     do_grade       : gradeEnabled,
@@ -2172,6 +2198,12 @@ function addLog(msg, type="info") {
   box.appendChild(line);
   box.scrollTop = box.scrollHeight;
 }
+</script>
+<script>
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/static/service-worker.js")
+      .catch(err => console.warn("SW register failed:", err));
+  }
 </script>
 </body>
 </html>

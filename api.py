@@ -178,7 +178,7 @@ class UpdateUserRequest(BaseModel):
     email     : Optional[str] = None
 
 @app.put("/api/admin/users/{user_id}")
-async def admin_update_user(user_id: int, req: UpdateUserRequest, request: Request):
+async def admin_update_user(user_id: str, req: UpdateUserRequest, request: Request):
     _require_mansion(request)
     ok, err = DB.update_user(user_id, req.package, req.is_active, req.email)
     if not ok:
@@ -190,7 +190,7 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 @app.put("/api/admin/users/{user_id}/reset-password")
-async def admin_reset_password(user_id: int, req: ResetPasswordRequest, request: Request):
+async def admin_reset_password(user_id: str, req: ResetPasswordRequest, request: Request):
     _require_mansion(request)
     if len(req.new_password) < 4:
         raise HTTPException(status_code=400, detail="Password minimal 4 karakter.")

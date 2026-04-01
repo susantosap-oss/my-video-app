@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Login — Video Generator</title>
+  <link rel="manifest" href="/static/manifest.json" />
+  <meta name="theme-color" content="#f59e0b" />
+  <link rel="apple-touch-icon" href="/static/icon-192.png" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -150,6 +153,12 @@
   function togglePw() {
     const inp = document.getElementById("password");
     inp.type = inp.type === "password" ? "text" : "password";
+  }
+</script>
+<script>
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/static/service-worker.js")
+      .catch(err => console.warn("SW register failed:", err));
   }
 </script>
 </body>
