@@ -604,7 +604,25 @@ def cleanup_session(sid: str):
             except Exception: pass
 
 
-# ── Pass 2 ────────────────────────────────────────────────────────────────────
+# ── Pass 2 (FFmpeg-accelerated) ───────────────────────────────────────────────
+def _overlay_to_png(arr: np.ndarray, path: str):
+    """Save RGBA numpy array as PNG file."""
+    Image.fromarray(arr.astype(np.uint8)).save(path)
+
+
+def _get_video_duration(path: str) -> float:
+    """Get video duration via ffprobe."""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True, timeout=10,
+        )
+        return float(r.stdout.strip())
+    except Exception:
+        return 0.0
+
+
 def run_pass2(
     pass1_path, out_path, deskripsi, n_caption, detail_colors,
     cta_nama, cta_wa, cta_dur, cta_label,
@@ -617,130 +635,192 @@ def run_pass2(
     watermark_text="",
 ):
     """
-    Pass 2: overlay caption + CTA + color grade → write to out_path.
+    Pass 2 (hybrid): PIL pre-renders overlays as PNG, FFmpeg does compositing.
     Returns: (success: bool, captions: list, error: str)
-
-    bgm_path  : str path to BGM audio file (or "" for no BGM)
-    ai_captions: optional list of {text, color, align} dicts from Full AI spec
     """
     def _log(msg):
         if status_cb: status_cb(msg)
         else: logger.info(msg)
 
-    open_clips, bgm_tmp = [], f"tmp_{session_id}_bgm.mp3"
-    bgm_created = False
+    tmp_pngs = []
+
+    def _tmp_png(name):
+        p = f"tmp_{session_id}_{name}.png"
+        tmp_pngs.append(p)
+        return p
+
     try:
         # ── Captions ──────────────────────────────────────────────────────────
         if ai_captions:
-            captions = [c["text"] for c in ai_captions]
-            all_colors = [
-                COLOR_NAME_TO_RGB.get(c.get("color", "White"), (255,255,255))
-                for c in ai_captions
-            ]
+            captions   = [c["text"] for c in ai_captions]
+            all_colors = [COLOR_NAME_TO_RGB.get(c.get("color", "White"), (255,255,255)) for c in ai_captions]
             all_aligns = [c.get("align", "Center") for c in ai_captions]
         else:
             captions   = split_description_to_captions(deskripsi, n_caption)
             all_colors = [HOOK_COLOR] + list(detail_colors)
             all_aligns = [caption_align] * len(captions)
 
-        _log(f"NLP:{NLP_ENGINE} | {len(captions)} caption | align:{caption_align}")
+        _log(f"NLP:{NLP_ENGINE} | {len(captions)} caption")
 
         font_size, hook_size, pad_x, pad_y = compute_layout(OUT_W)
         active_font = get_font_path(font_path)
-        bar_h = max(3, int(OUT_H * 0.006))
+        bar_h       = max(3, int(OUT_H * 0.006))
 
-        # ── Pre-render overlays ────────────────────────────────────────────────
-        overlays = []
+        # ── Pre-render overlays → PNG ──────────────────────────────────────────
+        _log("Pre-render overlays...")
+        cap_pngs = []
         for idx, cap in enumerate(captions):
             color = all_colors[idx % len(all_colors)]
             align = all_aligns[idx] if idx < len(all_aligns) else caption_align
             sz    = hook_size if idx == 0 else font_size
-            ov    = render_caption_overlay(
+            arr   = render_caption_overlay(
                 cap, OUT_W, OUT_H, sz, pad_x, pad_y,
                 color_rgb=color, font_path=active_font,
                 logo_pil=logo_pil, align=align,
             )
-            overlays.append(ov)
+            p = _tmp_png(f"cap{idx}")
+            _overlay_to_png(arr, p)
+            cap_pngs.append(p)
 
-        cta_overlay = None
+        cta_png = None
         if cta_nama.strip() or cta_wa.strip():
-            cta_overlay = render_cta_overlay(
+            arr = render_cta_overlay(
                 cta_nama.strip(), cta_wa.strip(),
                 OUT_W, OUT_H, font_size, pad_x, pad_y,
                 font_path=active_font, logo_pil=logo_pil,
                 label=cta_label.strip() if cta_label.strip() else "",
             )
+            cta_png = _tmp_png("cta")
+            _overlay_to_png(arr, cta_png)
 
-        _log("Membaca Pass 1...")
-        p1_clip   = VideoFileClip(pass1_path)
-        open_clips.append(p1_clip)
-        total_dur = p1_clip.duration
+        wm_png = None
+        if watermark_text:
+            arr    = render_watermark_overlay(watermark_text, OUT_W, OUT_H, active_font)
+            wm_png = _tmp_png("wm")
+            _overlay_to_png(arr, wm_png)
+
+        # ── Video duration ─────────────────────────────────────────────────────
+        total_dur = _get_video_duration(pass1_path)
+        if total_dur <= 0:
+            return False, [], "Tidak bisa baca durasi pass1"
+
         n_cap     = len(captions)
         interval  = total_dur / max(n_cap, 1)
         cta_start = max(0.0, total_dur - cta_dur)
-        audio_src = p1_clip.audio
 
-        # ── BGM ────────────────────────────────────────────────────────────────
-        if bgm_path and os.path.exists(bgm_path):
-            try:
-                import shutil
-                shutil.copy(bgm_path, bgm_tmp)
-                bgm_created = True
-                bgm_raw     = AudioFileClip(bgm_tmp)
-                if bgm_raw.duration > total_dur:
-                    bgm_raw = bgm_raw.subclipped(0, total_dur)
-                fo_dur    = min(3.0, bgm_raw.duration * 0.3)
-                bgm_audio = bgm_raw.with_effects([AudioFadeOut(fo_dur), MultiplyVolume(bgm_volume)])
-                if audio_src is not None:
-                    audio_src = audio_src.with_effects([MultiplyVolume(orig_vol)])
-                mixed = [a for a in [audio_src, bgm_audio] if a is not None]
-                if mixed:
-                    audio_src = CompositeAudioClip(mixed)
-                _log(f"BGM loaded: {bgm_raw.duration:.1f}s")
-            except Exception as e:
-                _log(f"BGM warning: {e}")
+        # ── Build FFmpeg filtergraph ───────────────────────────────────────────
+        _log("Build FFmpeg filtergraph...")
 
-        _do = bool(do_grade)
-        _br = float(brightness) if _do else 1.0
-        _co = float(contrast)   if _do else 1.0
-        _sa = float(saturation) if _do else 1.0
-        _sh = float(sharpness)  if _do else 1.0
-        _ovs, _cta, _cs, _iv = list(overlays), cta_overlay, float(cta_start), float(interval)
-        _nc, _td, _bh = int(n_cap), float(total_dur), int(bar_h)
-        _ow, _oh       = int(OUT_W), int(OUT_H)
+        # Input list: [pass1, cap0, cap1, ..., cta?, wm?, bgm?]
+        inputs = ["-i", pass1_path]
+        overlay_inputs = []   # (input_index, type, start, end)
+        i_idx = 1             # next input index
 
-        _wm = render_watermark_overlay(watermark_text, _ow, _oh, active_font) if watermark_text else None
+        for ci, cp in enumerate(cap_pngs):
+            inputs += ["-i", cp]
+            t_start = ci * interval
+            t_end   = (ci + 1) * interval
+            overlay_inputs.append((i_idx, "cap", t_start, t_end))
+            i_idx += 1
 
-        def pass2_proc(get_frame, t):
-            frame = get_frame(t)
-            if _do: frame = grade_frame(frame, _br, _co, _sa, _sh)
-            if _cta is not None and t >= _cs:
-                frame = blend(frame, _cta)
-            else:
-                idx   = min(int(t / _iv), _nc - 1)
-                frame = blend(frame, _ovs[idx])
-            if _wm is not None:
-                frame = blend(frame, _wm)
-            return draw_progress_bar(frame, t, _td, _ow, _oh, _bh)
+        if cta_png:
+            inputs += ["-i", cta_png]
+            overlay_inputs.append((i_idx, "cta", cta_start, total_dur))
+            i_idx += 1
 
-        _log("Render Pass 2...")
-        final_video = p1_clip.transform(pass2_proc)
-        if audio_src is not None:
-            final_video = final_video.with_audio(audio_src)
-        final_video.write_videofile(
-            out_path, codec="libx264", audio_codec="aac", fps=24,
-            ffmpeg_params=["-pix_fmt", "yuv420p"], logger=None,
+        if wm_png:
+            inputs += ["-i", wm_png]
+            overlay_inputs.append((i_idx, "wm", 0.0, total_dur))
+            i_idx += 1
+
+        has_bgm = bgm_path and os.path.exists(bgm_path)
+        bgm_input_idx = None
+        if has_bgm:
+            inputs += ["-i", bgm_path]
+            bgm_input_idx = i_idx
+            i_idx += 1
+
+        # ── Video filter chain ─────────────────────────────────────────────────
+        vf_parts = []
+
+        # 1. Color grade using FFmpeg eq + unsharp
+        if do_grade:
+            br_ffmpeg = round(float(brightness) - 1.0, 3)   # PIL mult → FFmpeg offset
+            co_ffmpeg = round(float(contrast),    3)
+            sa_ffmpeg = round(float(saturation),  3)
+            sh_amount = round(max(0.0, float(sharpness) - 1.0), 3)
+            eq_str = f"eq=brightness={br_ffmpeg}:contrast={co_ffmpeg}:saturation={sa_ffmpeg}"
+            vf_parts.append(f"[0:v]{eq_str}[graded]")
+            if sh_amount > 0:
+                vf_parts.append(f"[graded]unsharp=5:5:{sh_amount}[graded]")
+            prev_label = "[graded]"
+        else:
+            prev_label = "[0:v]"
+
+        # 2. Timed overlays (captions, CTA, watermark)
+        for step, (inp_idx, ov_type, t_s, t_e) in enumerate(overlay_inputs):
+            out_label = f"[v{step}]"
+            enable    = f"between(t,{t_s:.3f},{t_e:.3f})"
+            vf_parts.append(
+                f"{prev_label}[{inp_idx}:v]overlay=0:0:enable='{enable}'{out_label}"
+            )
+            prev_label = out_label
+
+        # 3. Progress bar (white bar at bottom, grows with time)
+        vf_parts.append(
+            f"{prev_label}drawbox=x=0:y=ih-{bar_h}:w='iw*t/{total_dur:.3f}'"
+            f":h={bar_h}:color=white@1.0:t=fill[vout]"
         )
+
+        # ── Audio filter chain ─────────────────────────────────────────────────
+        if has_bgm:
+            fade_start = max(0.0, total_dur - 3.0)
+            af = (
+                f"[0:a]volume={orig_vol:.2f}[va];"
+                f"[{bgm_input_idx}:a]atrim=0:{total_dur:.3f},"
+                f"afade=t=out:st={fade_start:.3f}:d=3,"
+                f"volume={bgm_volume:.2f}[vb];"
+                f"[va][vb]amix=inputs=2:normalize=0[aout]"
+            )
+            audio_map = ["-map", "[aout]"]
+        else:
+            af = None
+            audio_map = ["-map", "0:a?"]
+
+        # ── Assemble FFmpeg command ────────────────────────────────────────────
+        filter_complex = ";".join(vf_parts)
+
+        cmd = ["ffmpeg", "-y"] + inputs
+        cmd += ["-filter_complex", filter_complex]
+        cmd += ["-map", "[vout]"] + audio_map
+        if af:
+            cmd += ["-af", ""]          # placeholder — handled in filter_complex
+            # audio already in filter_complex, remove placeholder
+            cmd = [x for x in cmd if x != ""]
+        cmd += [
+            "-c:v", "libx264", "-preset", "fast",
+            "-crf", "23", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "128k",
+            "-r", "24", "-movflags", "+faststart",
+            out_path,
+        ]
+
+        _log("Render Pass 2 (FFmpeg)...")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            logger.error(f"FFmpeg stderr: {result.stderr[-2000:]}")
+            return False, [], f"FFmpeg error: {result.stderr[-500:]}"
+
         return True, captions, ""
 
     except Exception as e:
+        logger.exception("run_pass2 error")
         return False, [], str(e)
 
     finally:
-        for oc in open_clips:
-            try: oc.close()
-            except Exception: pass
-        if bgm_created and os.path.exists(bgm_tmp):
-            try: os.remove(bgm_tmp)
-            except Exception: pass
+        for p in tmp_pngs:
+            try:
+                if os.path.exists(p): os.remove(p)
+            except Exception:
+                pass
         gc.collect()
